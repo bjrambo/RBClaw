@@ -1,0 +1,55 @@
+diff --git a/src/config.test.ts b/src/config.test.ts
+index 34265d8..5e5d503 100644
+--- a/src/config.test.ts
++++ b/src/config.test.ts
+@@ -31,6 +31,11 @@ describe('config/env loading', () => {
+     delete process.env.DISCORD_CODEX_REVIEW_BOT_TOKEN;
+     delete process.env.PAIRED_CARRY_FORWARD_LATEST_OWNER_FINAL;
+     delete process.env.PAIRED_FORCE_FRESH_CLAUDE_REVIEWER_SESSION;
++    delete process.env.CLAUDE_SERVICE_ID;
++    delete process.env.CODEX_REVIEW_SERVICE_ID;
++    delete process.env.REVIEWER_AGENT_TYPE;
++    delete process.env.ARBITER_AGENT_TYPE;
++    delete process.env.ARBITER_SERVICE_ID;
+     delete process.env.CODEX_WARMUP_ENABLED;
+     delete process.env.CODEX_WARMUP_PROMPT;
+     delete process.env.CODEX_WARMUP_MODEL;
+@@ -140,6 +145,22 @@ describe('config/env loading', () => {
+     expect(config.PAIRED_FORCE_FRESH_CLAUDE_REVIEWER_SESSION).toBe(true);
+   });
+ 
++  it('routes a Claude arbiter to the Claude service by default', async () => {
++    process.env.CLAUDE_SERVICE_ID = 'zinna';
++    process.env.CODEX_REVIEW_SERVICE_ID = 'codex-review';
++    process.env.REVIEWER_AGENT_TYPE = 'claude-code';
++    process.env.ARBITER_AGENT_TYPE = 'claude-code';
++
++    let config = await import('./config.js');
++    expect(config.REVIEWER_SERVICE_ID_FOR_TYPE).toBe('zinna');
++    expect(config.ARBITER_SERVICE_ID).toBe('zinna');
++
++    vi.resetModules();
++    process.env.ARBITER_SERVICE_ID = 'claude-arbiter';
++    config = await import('./config.js');
++    expect(config.ARBITER_SERVICE_ID).toBe('claude-arbiter');
++  });
++
+   it('keeps Codex warm-up disabled by default and exposes conservative opt-in env config', async () => {
+     let config = await import('./config.js');
+     expect(config.CODEX_WARMUP_CONFIG.enabled).toBe(false);
+diff --git a/src/config/load-config.ts b/src/config/load-config.ts
+index a457013..34d36a7 100644
+--- a/src/config/load-config.ts
++++ b/src/config/load-config.ts
+@@ -232,7 +232,10 @@ export function loadConfig(): AppConfig {
+           : codexReviewServiceId,
+       arbiterAgentType,
+       arbiterServiceId: arbiterAgentType
+-        ? (readText('ARBITER_SERVICE_ID') ?? codexReviewServiceId)
++        ? (readText('ARBITER_SERVICE_ID') ??
++          (arbiterAgentType === 'claude-code'
++            ? claudeServiceId
++            : codexReviewServiceId))
+         : null,
+       carryForwardLatestOwnerFinal: readBoolean(
+         'PAIRED_CARRY_FORWARD_LATEST_OWNER_FINAL',

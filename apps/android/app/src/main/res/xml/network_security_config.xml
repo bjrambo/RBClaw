@@ -1,0 +1,5 @@
+<network-security-config>
+    <!-- The app validates user-entered HTTP URLs and only accepts local,
+         private-network, or Tailscale hosts. Public hosts require HTTPS. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
