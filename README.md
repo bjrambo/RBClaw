@@ -147,6 +147,24 @@ OWNER_AGENT_TYPE=codex
 REVIEWER_AGENT_TYPE=claude-code
 ```
 
+### 개인 페르소나와 로컬 규칙
+
+공개 프롬프트를 수정하지 않고 개인 페르소나, 말투, 프로젝트 경로 매핑,
+로컬 접근 규칙과 작업 선호를 설정하려면 예시 파일을 복사합니다.
+
+```bash
+cp prompts/CUSTOM.example.md prompts/CUSTOM.md
+```
+
+- `prompts/CUSTOM.md`는 owner 프롬프트 맨 앞에 한 번 주입됩니다.
+- reviewer와 arbiter에는 주입되지 않아 독립적인 검증 역할을 유지합니다.
+- 이 파일은 Git에서 제외되므로 개인 설정을 공개 저장소에 커밋하지 않습니다.
+- 비밀번호, 토큰, 개인키 같은 자격증명은 저장하지 말고 `.env` 또는 지원되는
+  비밀 저장소를 사용합니다.
+
+자세한 작성 항목은
+[`prompts/CUSTOM.example.md`](prompts/CUSTOM.example.md)를 참고합니다.
+
 ### 실행
 
 ```bash
