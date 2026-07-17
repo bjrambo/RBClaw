@@ -9,7 +9,23 @@
 RBClaw는 Discord 위에서 동작하는 Tribunal 멀티에이전트 개발 보조 시스템입니다.
 사용자 요청은 owner가 받고, reviewer가 자동 리뷰를 수행하며, 필요할 때 arbiter가 교착을 정리합니다.
 
-RBClaw는 [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw)에서 출발하고 [phj1081/EJClaw](https://github.com/phj1081/EJClaw)의 흐름을 별도로 포크해 발전시킨 프로젝트입니다. 기존 Git 이력은 승계하지 않고, RBClaw의 Discord/paired-runtime 구조를 중심으로 새로운 시스템으로 독립 개발하고 있습니다.
+## 프로젝트 배경
+
+RBClaw의 코드 흐름은 [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw)에서
+출발해 [phj1081/EJClaw](https://github.com/phj1081/EJClaw)로 이어졌습니다.
+이후 EJClaw의 개발 방향이 최신 모델 성능에 맞춰 agent harness를 더 얇게
+가져가는 쪽으로 바뀌었습니다. 반면 실제 운영과 테스트를 거치면서 단순한
+실행 하네스만으로는 부족하고, 작업 결과를 다시 검토하고 교착을 정리하는
+구조화된 검증 시스템을 계속 유지할 필요가 있다고 판단했습니다.
+
+이후 요구사항은 Discord 중심의 owner / reviewer / arbiter 역할 분리,
+paired-runtime, room별 `workDir`, reviewer 읽기 전용 검증, 개인 설정과 공개
+코드의 분리까지 확장됐습니다. 기존 프로젝트와 지향점이 점차 달라지면서 이
+구조를 별도의 독립 프로젝트로 발전시키겠다는 계획이 만들어졌습니다.
+
+그 결과 과거 Git 이력을 새 공개 저장소에 승계하지 않고 RBClaw을 첫
+커밋부터 다시 시작했습니다. 현재는 Discord 기반 검증·중재 흐름을 중심으로
+독립 개발·운영되고 있습니다.
 
 ## 개요
 
