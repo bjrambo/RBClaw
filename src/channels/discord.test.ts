@@ -124,7 +124,11 @@ vi.mock('discord.js', () => {
     Client: MockClient,
     Events,
     GatewayIntentBits,
-    MessageFlags: { SuppressEmbeds: 1 << 2, IsVoiceMessage: 1 << 13 },
+    MessageFlags: {
+      SuppressEmbeds: 1 << 2,
+      SuppressNotifications: 1 << 12,
+      IsVoiceMessage: 1 << 13,
+    },
     TextChannel,
   };
 });
@@ -1202,6 +1206,82 @@ describe('setTyping', () => {
 
     // channels.fetch should NOT be called
     expect(currentClient().channels.fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses a temporary message when Discord rejects the typing indicator', async () => {
+    const opts = createTestOpts();
+    const channel = new DiscordChannel('test-token', opts);
+    await channel.connect();
+
+    const fallbackMessage = {
+      id: 'typing-fallback-1',
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockChannel = {
+      send: vi.fn().mockResolvedValue(fallbackMessage),
+      sendTyping: vi.fn().mockRejectedValue(new Error('Discord API 500')),
+    };
+    currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+    await channel.setTyping('dc:1234567890123456', true);
+
+    expect(mockChannel.send).toHaveBeenCalledWith({
+      content: '입력 중입니다...',
+      allowedMentions: { parse: [] },
+      flags: 1 << 12,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jid: 'dc:1234567890123456',
+        channelName: 'discord',
+      }),
+      'Discord typing indicator failed; using a temporary message fallback',
+    );
+  });
+
+  it('removes the temporary typing message when typing stops', async () => {
+    const opts = createTestOpts();
+    const channel = new DiscordChannel('test-token', opts);
+    await channel.connect();
+
+    const fallbackMessage = {
+      id: 'typing-fallback-1',
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    currentClient().channels.fetch.mockResolvedValue({
+      send: vi.fn().mockResolvedValue(fallbackMessage),
+      sendTyping: vi.fn().mockRejectedValue(new Error('Discord API 500')),
+    });
+
+    await channel.setTyping('dc:1234567890123456', true);
+    await channel.setTyping('dc:1234567890123456', false);
+
+    expect(fallbackMessage.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes the temporary message when the typing API recovers', async () => {
+    const opts = createTestOpts();
+    const channel = new DiscordChannel('test-token', opts);
+    await channel.connect();
+
+    const fallbackMessage = {
+      id: 'typing-fallback-1',
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockChannel = {
+      send: vi.fn().mockResolvedValue(fallbackMessage),
+      sendTyping: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Discord API 500'))
+        .mockResolvedValue(undefined),
+    };
+    currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+    await channel.setTyping('dc:1234567890123456', true);
+    await channel.setTyping('dc:1234567890123456', true);
+
+    expect(mockChannel.send).toHaveBeenCalledTimes(1);
+    expect(fallbackMessage.delete).toHaveBeenCalledTimes(1);
   });
 
   it('does not send stale typing after typing was disabled mid-flight', async () => {

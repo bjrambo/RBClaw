@@ -41,6 +41,7 @@ const DISCORD_ARBITER_TOKEN_KEY = 'DISCORD_ARBITER_BOT_TOKEN';
 const DISCORD_MENTION_ALIAS_KEY = 'DISCORD_MENTION_ALIAS';
 const DISCORD_MENTION_USER_ID_KEY = 'DISCORD_MENTION_USER_ID';
 const DISCORD_USER_ID_PATTERN = /^\d{17,20}$/;
+const TYPING_FALLBACK_TEXT = '입력 중입니다...';
 const TRANSIENT_ATTACHMENT_REJECTION_REASONS = new Set([
   'not-found',
   'validation-error',
@@ -230,6 +231,8 @@ export class DiscordChannel implements Channel {
   private botToken: string;
   private typingIntervals = new Map<string, NodeJS.Timeout>();
   private typingGenerations = new Map<string, number>();
+  private typingFallbackMessages = new Map<string, Message>();
+  private typingFallbackPending = new Set<string>();
   private agentTypeFilter?: AgentType;
   private receivesInbound: boolean;
   private ownsDiscordJids: boolean;
@@ -628,22 +631,40 @@ export class DiscordChannel implements Channel {
       this.typingIntervals.delete(jid);
     }
 
-    if (!isTyping) return;
+    if (!isTyping) {
+      await this.clearTypingFallback(jid);
+      return;
+    }
 
     const isCurrentGeneration = () =>
       this.typingGenerations.get(jid) === generation;
 
     const sendOnce = async () => {
       if (!isCurrentGeneration()) return;
+      let channel: Awaited<ReturnType<Client['channels']['fetch']>> | null =
+        null;
       try {
         const channelId = jid.replace(/^dc:/, '');
-        const channel = await this.client!.channels.fetch(channelId);
+        channel = await this.client!.channels.fetch(channelId);
         if (!isCurrentGeneration()) return;
-        if (channel && 'sendTyping' in channel) {
-          await (channel as TextChannel).sendTyping();
+        if (!channel || !('sendTyping' in channel)) {
+          throw new Error(`Discord channel does not support typing: ${jid}`);
         }
+        await (channel as TextChannel).sendTyping();
+        if (!isCurrentGeneration()) return;
+        await this.clearTypingFallback(jid);
       } catch (err) {
-        logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+        if (!isCurrentGeneration()) return;
+        if (channel && 'send' in channel) {
+          await this.ensureTypingFallback(jid, channel as TextChannel, err, {
+            isCurrentGeneration,
+          });
+          return;
+        }
+        logger.warn(
+          { jid, channelName: this.name, err },
+          'Failed to send Discord typing indicator and no message fallback is available',
+        );
       }
     };
 
@@ -656,6 +677,67 @@ export class DiscordChannel implements Channel {
         void sendOnce();
       }, 8000),
     );
+  }
+
+  private async ensureTypingFallback(
+    jid: string,
+    channel: TextChannel,
+    typingError: unknown,
+    options: { isCurrentGeneration: () => boolean },
+  ): Promise<void> {
+    if (
+      !options.isCurrentGeneration() ||
+      this.typingFallbackMessages.has(jid) ||
+      this.typingFallbackPending.has(jid)
+    ) {
+      return;
+    }
+
+    this.typingFallbackPending.add(jid);
+    try {
+      const message = await channel.send({
+        content: TYPING_FALLBACK_TEXT,
+        allowedMentions: { parse: [] },
+        flags: MessageFlags.SuppressNotifications,
+      });
+      if (!options.isCurrentGeneration()) {
+        await message.delete().catch(() => undefined);
+        return;
+      }
+      this.typingFallbackMessages.set(jid, message);
+      logger.warn(
+        { jid, channelName: this.name, err: typingError },
+        'Discord typing indicator failed; using a temporary message fallback',
+      );
+    } catch (fallbackError) {
+      logger.warn(
+        {
+          jid,
+          channelName: this.name,
+          typingError,
+          fallbackError,
+        },
+        'Failed to send Discord typing indicator fallback message',
+      );
+    } finally {
+      this.typingFallbackPending.delete(jid);
+    }
+  }
+
+  private async clearTypingFallback(jid: string): Promise<void> {
+    const message = this.typingFallbackMessages.get(jid);
+    if (!message) return;
+    try {
+      await message.delete();
+      if (this.typingFallbackMessages.get(jid) === message) {
+        this.typingFallbackMessages.delete(jid);
+      }
+    } catch (err) {
+      logger.warn(
+        { jid, channelName: this.name, messageId: message.id, err },
+        'Failed to delete Discord typing fallback message',
+      );
+    }
   }
 
   async sendAndTrack(jid: string, text: string): Promise<string | null> {
