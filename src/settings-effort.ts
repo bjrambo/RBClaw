@@ -7,6 +7,7 @@ export const CODEX_EFFORT_VALUES = [
   'high',
   'xhigh',
   'max',
+  'ultra',
 ] as const;
 
 export const CLAUDE_EFFORT_VALUES = [

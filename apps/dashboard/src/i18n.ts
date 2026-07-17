@@ -107,6 +107,7 @@ export interface Messages {
         high: string;
         xhigh: string;
         max: string;
+        ultra: string;
       };
       agentTypeLabel: string;
       agentTypeCodex: string;
@@ -549,6 +550,7 @@ export const messages = {
           high: '높음',
           xhigh: '매우 높음',
           max: '최대',
+          ultra: '울트라',
         },
         agentTypeLabel: '에이전트',
         agentTypeCodex: 'Codex',
@@ -986,6 +988,7 @@ export const messages = {
           high: 'High',
           xhigh: 'Very high',
           max: 'Max',
+          ultra: 'Ultra',
         },
         agentTypeLabel: 'Agent',
         agentTypeCodex: 'Codex',
@@ -1419,6 +1422,7 @@ export const messages = {
           high: '高',
           xhigh: '很高',
           max: '最大',
+          ultra: '超强',
         },
         agentTypeLabel: '代理',
         agentTypeCodex: 'Codex',
@@ -1851,6 +1855,7 @@ export const messages = {
           high: '高',
           xhigh: '最高',
           max: '最大',
+          ultra: 'ウルトラ',
         },
         agentTypeLabel: 'エージェント',
         agentTypeCodex: 'Codex',

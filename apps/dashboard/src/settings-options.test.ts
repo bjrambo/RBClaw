@@ -10,7 +10,7 @@ import {
 } from './settings-options';
 
 describe('settings-options effort', () => {
-  it('limits Claude agents to low through max without xhigh', () => {
+  it('limits Claude agents to their supported effort values', () => {
     expect(effortValuesForAgent('claude-code')).toEqual([
       '',
       'low',
@@ -19,16 +19,20 @@ describe('settings-options effort', () => {
       'max',
     ]);
     expect(isEffortSupported('claude-code', 'xhigh')).toBe(false);
+    expect(isEffortSupported('claude-code', 'ultra')).toBe(false);
     expect(isEffortSupported('claude-code', 'high')).toBe(true);
   });
 
-  it('allows xhigh for Codex agents', () => {
+  it('allows xhigh and ultra for Codex agents', () => {
     expect(effortValuesForAgent('codex')).toContain('xhigh');
+    expect(effortValuesForAgent('codex')).toContain('ultra');
     expect(isEffortSupported('codex', 'xhigh')).toBe(true);
+    expect(isEffortSupported('codex', 'ultra')).toBe(true);
   });
 
   it('shows raw effort keys beside localized labels', () => {
     expect(formatEffortOption('high', '높음')).toBe('높음 (high)');
+    expect(formatEffortOption('ultra', '울트라')).toBe('울트라 (ultra)');
     expect(formatEffortOption('', '기본값')).toBe('기본값');
   });
 });
