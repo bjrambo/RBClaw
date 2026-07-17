@@ -102,10 +102,32 @@ Codex 쪽은 현재 **OAuth 세션 파일** 기준으로 동작합니다. `OPENA
 
 ```bash
 GROQ_API_KEY=
+OPENAI_API_KEY=
 ```
 
 - 기본은 Groq Whisper
-- 필요 시 OpenAI Whisper fallback을 별도 확장할 수 있지만, 현재 README / 문서 기준 최소 키는 `GROQ_API_KEY`입니다
+- `GROQ_API_KEY`가 없으면 `OPENAI_API_KEY`로 OpenAI Whisper를 사용합니다
+- `OPENAI_API_KEY`는 음성 전사 fallback 용도이며 Codex child process에는
+  전달되지 않습니다
+
+## 웹 대시보드
+
+```bash
+WEB_DASHBOARD_ENABLED=false
+WEB_DASHBOARD_HOST=127.0.0.1
+WEB_DASHBOARD_PORT=8734
+WEB_DASHBOARD_TOKEN=
+```
+
+- 기본값은 비활성화, `127.0.0.1:8734`입니다
+- localhost의 GET 조회는 token 없이 사용할 수 있습니다
+- 메시지 전송, 설정 변경, 서비스 재시작 같은 mutating API에는
+  `WEB_DASHBOARD_TOKEN`이 반드시 필요합니다
+- private / tailnet bind는 token 없이 시작할 수 있지만 network-level trust에
+  의존하므로 token 설정을 권장합니다
+- public host bind는 `WEB_DASHBOARD_TOKEN`이 없으면 시작을 거부합니다
+- 외부 접근은 Tailscale, VPN, SSH tunnel 또는 HTTPS reverse proxy 뒤에서
+  운영합니다
 
 ## MoA
 
