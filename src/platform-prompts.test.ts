@@ -97,7 +97,7 @@ describe('platform-prompts', () => {
     expect(codexPairedPrompt).toContain('the output is invalid');
     expect(codexPairedPrompt).toContain('RBCLAW_WORK_DIR');
     expect(codexPairedPrompt).toContain(
-      'canonical verification root for this turn',
+      'primary verification root for this turn, not the only readable target',
     );
     expect(codexPairedPrompt).toContain(
       'suggest 1-2 better alternatives with the reason and tradeoff for each',
@@ -117,6 +117,38 @@ describe('platform-prompts', () => {
       'utf-8',
     );
     expect(failoverPlatformPrompt).toContain('acting as `클코`');
+  });
+
+  it('separates the owner default cwd from authorized external access while keeping review read-only', () => {
+    const repoRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+    );
+    const promptsDir = path.join(repoRoot, 'prompts');
+    const ownerPrompt = fs.readFileSync(
+      path.join(promptsDir, 'owner-common-paired-room.md'),
+      'utf-8',
+    );
+    const reviewerPrompt = fs.readFileSync(
+      path.join(promptsDir, 'claude-paired-room.md'),
+      'utf-8',
+    );
+    const arbiterPrompt = fs.readFileSync(
+      path.join(promptsDir, 'arbiter-paired-room.md'),
+      'utf-8',
+    );
+
+    expect(ownerPrompt).toContain('not as an owner access boundary');
+    expect(ownerPrompt).toContain('SSH, SFTP, FTP, or remote services');
+    expect(ownerPrompt).toContain('Report every external path or host touched');
+    expect(ownerPrompt).not.toContain('Do not read or write sibling projects');
+    expect(reviewerPrompt).toContain(
+      'every local path that the owner reports touching',
+    );
+    expect(reviewerPrompt).toContain('Keep all verification read-only');
+    expect(arbiterPrompt).toContain(
+      'every external local path the owner reports touching',
+    );
   });
 
   it('keeps the superpowers-derived debugging guidance compressed and role-scoped', () => {

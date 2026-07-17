@@ -70,11 +70,13 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
 ## Reviewer / Arbiter runtime
 
 - `paired_tasks.work_dir`는 작업 생성 시 채널의 지정 폴더를 고정합니다
-- owner는 지정 폴더를 직접 사용하고 reviewer / arbiter는 `unshare` mount namespace에서 동일 폴더를 read-only mount로 읽습니다
+- owner는 지정 폴더를 기본 cwd로 사용하고, 사용자 지시와 room/local 규칙이 허용하면 다른 로컬 경로나 SSH·SFTP·FTP 원격 대상도 작업합니다
+- reviewer / arbiter는 `unshare` mount namespace에서 호스트 홈과 지정 폴더를 read-only로 읽고, owner가 보고한 외부 로컬 경로와 비변경 원격 증거를 같이 검증합니다
 - reviewer / arbiter namespace는 호스트 홈도 read-only로 잠그고, 역할 세션과 IPC 디렉토리만 쓰기 가능하게 다시 mount합니다
 - sandbox 설정 뒤 mount capability를 제거하며, 경계 구성이나 경로 겹침 검증에 실패하면 agent를 실행하지 않습니다
 - clone, snapshot, linked worktree는 생성하지 않습니다
 - 채널에 `workDir`가 없거나 경로가 유효하지 않으면 다른 경로로 fallback하지 않고 실행을 차단합니다
+- `workDir`는 기본 실행 위치와 잠금 키이며 owner의 절대 접근 경계가 아닙니다. 외부 접근 허용은 사용자 지시와 room/local 규칙이 결정합니다
 - arbiter는 reviewer와 같은 read-only 작업 폴더를 쓰되, 세션 디렉토리는 매 호출마다 fresh하게 준비합니다
 
 ## 세션 / 프롬프트 구성

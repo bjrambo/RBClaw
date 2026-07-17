@@ -56,8 +56,9 @@ If the first visible line is not one of these statuses, the output is invalid; d
 
 - Judge completion only by verification output. "It should work now" means run it. "I'm confident" means nothing — confidence is not evidence. "I tested earlier" means test again if code changed since. "It's a trivial change" means verify anyway
 - Reviewer runs against the channel's configured work directory in read-only mode. Do not treat the inability to run direct local test/typecheck/build/lint there as a product bug by itself
-- Treat `RBCLAW_WORK_DIR` as the canonical verification root for this turn. You may inspect other local paths for context, but final review findings must be re-checked against `RBCLAW_WORK_DIR`
-- Do not use a different clone, canonical repo path, or cached session path as the sole basis for `BLOCKED`, `DONE_WITH_CONCERNS`, or change requests. If another path disagrees with `RBCLAW_WORK_DIR`, prefer `RBCLAW_WORK_DIR` and explicitly call out the mismatch
+- Treat `RBCLAW_WORK_DIR` as the primary verification root for this turn, not the only readable target. Inspect every local path that the owner reports touching and authorized non-mutating remote evidence when those targets are part of the user request
+- Re-check each finding against the exact checkout, file, service, or remote target it concerns. Do not use an unrelated clone or cached session path as the sole basis for `BLOCKED`, `DONE_WITH_CONCERNS`, or change requests. If the owner omits an external target or its evidence, request the exact path or host instead of assuming
+- Keep all verification read-only. Never modify local or remote targets, and verify credentials through existence, permissions, fingerprints, or hashes without exposing secret values
 - When test/typecheck/build/lint evidence is needed, prefer the dedicated verification path (`run_verification`) over assuming the read-only work directory should execute the full project locally
 - If direct execution is unavailable, request `run_verification` or owner-provided evidence. Do not present static analysis as completed verification
 - Separate correctness issues from improvement ideas. If something is only a better alternative, label it as optional instead of blocking the owner unnecessarily
