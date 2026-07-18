@@ -134,6 +134,8 @@ export function RoomCardV2({
   const outputs = task?.outputs ?? [];
   const latestOutput = outputs.at(-1) ?? null;
   const messages = activity?.messages ?? [];
+  const latestMessage = messages.at(-1) ?? null;
+  const latestPendingMessage = pendingMessages.at(-1) ?? null;
   const isProcessing = entry.status === 'processing';
   const liveTurnStart =
     turn && turn.completedAt === null
@@ -166,12 +168,22 @@ export function RoomCardV2({
     pendingMessages,
   });
 
-  useRoomDetailAutoscroll({
-    entryJid: entry.jid,
-    messagesLen: messages.length,
-    outputsLen: outputs.length,
-    pendingLen: pendingMessages.length,
-  });
+  const scrollRevision = [
+    entry.jid,
+    messages.length,
+    latestMessage?.id ?? '',
+    latestMessage?.timestamp ?? '',
+    outputs.length,
+    latestOutput?.id ?? '',
+    latestOutput?.createdAt ?? '',
+    pendingMessages.length,
+    latestPendingMessage?.id ?? '',
+    latestPendingMessage?.timestamp ?? '',
+    task?.updatedAt ?? '',
+    turn?.updatedAt ?? '',
+    turn?.progressUpdatedAt ?? '',
+  ].join('\u0000');
+  useRoomDetailAutoscroll(scrollRevision);
 
   const formatters = {
     formatDate,
@@ -277,20 +289,10 @@ export function RoomCardV2({
   );
 }
 
-function useRoomDetailAutoscroll({
-  entryJid,
-  messagesLen,
-  outputsLen,
-  pendingLen,
-}: {
-  entryJid: string;
-  messagesLen: number;
-  outputsLen: number;
-  pendingLen: number;
-}) {
+function useRoomDetailAutoscroll(scrollRevision: string) {
   useEffect(() => {
     scrollRoomDetailToBottom();
-  }, [entryJid, messagesLen, outputsLen, pendingLen]);
+  }, [scrollRevision]);
 }
 
 const TASK_STATUS_PREFIX = '⁣⁣⁣';

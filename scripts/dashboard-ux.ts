@@ -12,6 +12,7 @@ interface MockApiState {
   ciWatcherFailures: number;
   restartRequests: number;
   roomMessageCount: number;
+  roomMessageRevision: number;
   roomSkillUpdates: number;
   roomSkillsDisableCodexBrowser: boolean;
 }
@@ -176,17 +177,18 @@ async function runDesktopDashboardScenarios(browser: Browser, baseUrl: string) {
   );
 
   await runScenario(
-    'room thread follows newly arrived messages to the bottom',
+    'room thread follows new and updated messages to the bottom',
     browser,
     baseUrl,
     async (page, state) => {
       state.approvalAction = true;
       state.roomMessageCount = 32;
+      state.roomMessageRevision = 0;
 
       await page.goto(new URL('/#/rooms', baseUrl).toString(), {
         waitUntil: 'networkidle',
       });
-      await page.getByText('dashboard message 32').waitFor();
+      await page.getByText('dashboard message 32 revision 0').waitFor();
 
       const detail = page.locator('.rooms-detail');
       await detail.evaluate((element) => {
@@ -197,6 +199,19 @@ async function runDesktopDashboardScenarios(browser: Browser, baseUrl: string) {
       );
       assert.equal(canScroll, true);
 
+      state.roomMessageRevision = 1;
+      await page
+        .getByText('dashboard message 32 revision 1')
+        .waitFor({ timeout: 5_000 });
+      await page.waitForFunction(`(() => {
+        const element = document.querySelector('.rooms-detail');
+        if (!(element instanceof HTMLElement)) return false;
+        return element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+      })()`);
+
+      await detail.evaluate((element) => {
+        element.scrollTop = 0;
+      });
       state.roomMessageCount += 1;
       await page.getByText('dashboard message 33').waitFor({ timeout: 5_000 });
       await page.waitForFunction(`(() => {
@@ -440,6 +455,7 @@ function createMockApiState(): MockApiState {
     ciWatcherFailures: 0,
     restartRequests: 0,
     roomMessageCount: 0,
+    roomMessageRevision: 0,
     roomSkillUpdates: 0,
     roomSkillsDisableCodexBrowser: false,
   };
@@ -845,10 +861,10 @@ function mockRoomActivity(state: MockApiState) {
     ...mockStatusSnapshot().entries[0],
     serviceId: 'codex-main',
     messages: Array.from({ length: state.roomMessageCount }, (_, index) => ({
-      id: `dashboard-message-${index + 1}`,
+      id: `dashboard-message-${index + 1}-revision-${state.roomMessageRevision}`,
       sender: 'web-dashboard',
       senderName: 'Fixture_WEB',
-      content: `dashboard message ${index + 1} ${'content '.repeat(12)}`,
+      content: `dashboard message ${index + 1} revision ${state.roomMessageRevision} ${'content '.repeat(12)}`,
       timestamp: new Date(index + 1).toISOString(),
       isFromMe: false,
       isBotMessage: false,
