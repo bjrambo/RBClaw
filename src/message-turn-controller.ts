@@ -1,4 +1,5 @@
 import { type AgentOutput } from './agent-runner.js';
+import { CoalescingAsyncTask } from './coalescing-async-task.js';
 import {
   getAgentOutputAttachments,
   getAgentOutputText,
@@ -68,8 +69,10 @@ export class MessageTurnController {
   private latestProgressRendered: string | null = null;
   private progressMessageId: string | null = null;
   private progressStartedAt: number | null = null;
-  private progressTicker: ReturnType<typeof setInterval> | null = null;
   private progressEditFailCount = 0;
+  private readonly progressEdits = new CoalescingAsyncTask(() =>
+    this.syncTrackedProgressMessageOnce(),
+  );
   private latestProgressTextForFinal: string | null = null;
   private subagents = new Map<string, SubagentTrack>();
   private lastIntermediateText: string | null = null;
@@ -259,7 +262,7 @@ export class MessageTurnController {
         this.latestProgressTextForFinal = text;
         this.pendingProgressText = null; // discard stale buffer
         this.toolActivities = [];
-        void this.syncTrackedProgressMessage();
+        void this.progressEdits.request();
       } else {
         // No progress yet — buffer (creates on next event)
         this.bufferProgress(text);
@@ -278,7 +281,7 @@ export class MessageTurnController {
       // Subagent tool activity
       recordSubagentToolActivity(this.subagents, result.agentId, text);
       this.ensureProgressMessageExists();
-      this.ensureProgressTicker();
+      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
       if (!this.poisonedSessionDetected) {
         this.resetIdleTimer();
       }
@@ -307,9 +310,9 @@ export class MessageTurnController {
         this.latestProgressTextForFinal = '작업 중...';
       }
       this.ensureProgressMessageExists();
-      this.ensureProgressTicker();
+      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
       if (this.progressMessageId) {
-        void this.syncTrackedProgressMessage();
+        void this.progressEdits.request();
       }
       if (!this.poisonedSessionDetected) {
         this.resetIdleTimer();
@@ -326,7 +329,7 @@ export class MessageTurnController {
         this.previousProgressText = this.latestProgressText;
         this.latestProgressText = text;
         this.toolActivities = [];
-        void this.syncTrackedProgressMessage();
+        void this.progressEdits.request();
       } else {
         this.bufferProgress(text);
       }
@@ -377,7 +380,7 @@ export class MessageTurnController {
       await this.publishFailureFinal();
     }
 
-    this.clearProgressTicker();
+    this.progressEdits.stop();
     if (this.idleTimer) clearTimeout(this.idleTimer);
 
     return {
@@ -417,14 +420,9 @@ export class MessageTurnController {
     });
   }
 
-  private clearProgressTicker(): void {
-    if (!this.progressTicker) return;
-    clearInterval(this.progressTicker);
-    this.progressTicker = null;
-  }
-
   private resetProgressState(): void {
-    this.clearProgressTicker();
+    this.progressEdits.stop();
+    this.progressEdits.cancelPending();
     this.pendingProgressText = null;
     this.progressCreating = false;
     this.toolActivities = [];
@@ -460,12 +458,12 @@ export class MessageTurnController {
     }
     void this.sendProgressMessage(heading).then(() => {
       this.progressCreating = false;
-      this.ensureProgressTicker();
+      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
       if (
         (this.toolActivities.length > 0 || this.subagents.size > 0) &&
         this.progressMessageId
       ) {
-        void this.syncTrackedProgressMessage();
+        void this.progressEdits.request();
       }
     });
     this.pendingProgressText = null;
@@ -496,7 +494,7 @@ export class MessageTurnController {
     }
     // Don't sync here — let the ticker handle periodic updates
     // to avoid flooding Discord with edits.
-    this.ensureProgressTicker();
+    this.progressEdits.start(5_000, !!this.options.channel.editMessage);
   }
 
   /**
@@ -547,7 +545,7 @@ export class MessageTurnController {
     this.pendingProgressText = null;
   }
 
-  private async syncTrackedProgressMessage(): Promise<void> {
+  private async syncTrackedProgressMessageOnce(): Promise<void> {
     if (
       this.options.canDeliverFinalText &&
       !this.options.canDeliverFinalText()
@@ -565,34 +563,41 @@ export class MessageTurnController {
       return;
     }
 
-    if (
-      !this.progressMessageId ||
-      !this.options.channel.editMessage ||
-      !this.latestProgressText
-    ) {
+    const progressMessageId = this.progressMessageId;
+    const latestProgressText = this.latestProgressText;
+    const editMessage = this.options.channel.editMessage;
+    if (!progressMessageId || !editMessage || !latestProgressText) {
       return;
     }
 
-    const rendered = this.renderProgressMessage(this.latestProgressText);
+    const rendered = this.renderProgressMessage(latestProgressText);
+    if (rendered === this.latestProgressRendered) {
+      return;
+    }
 
     try {
-      await this.options.channel.editMessage(
-        this.options.chatJid,
-        this.progressMessageId,
-        rendered,
-      );
-      this.latestProgressRendered = rendered;
-      this.progressEditFailCount = 0;
+      await editMessage(this.options.chatJid, progressMessageId, rendered);
+      if (this.progressMessageId === progressMessageId) {
+        this.latestProgressRendered = rendered;
+        this.progressEditFailCount = 0;
+      }
       this.logOutboundAudit('progress-edit', {
-        messageId: this.progressMessageId,
-        textLength: this.latestProgressText.length,
+        messageId: progressMessageId,
+        textLength: latestProgressText.length,
         renderedLength: rendered.length,
       });
     } catch (err) {
+      if (this.progressMessageId !== progressMessageId) {
+        this.log.warn(
+          { progressMessageId, err },
+          'Tracked progress edit failed after progress state changed',
+        );
+        return;
+      }
       this.progressEditFailCount++;
       this.log.warn(
         {
-          progressMessageId: this.progressMessageId,
+          progressMessageId,
           progressEditFailCount: this.progressEditFailCount,
           err,
         },
@@ -600,28 +605,13 @@ export class MessageTurnController {
       );
       this.latestProgressRendered = null;
       if (this.progressEditFailCount >= 3) {
-        this.clearProgressTicker();
+        this.progressEdits.stop();
       }
     }
-  }
-
-  private ensureProgressTicker(): void {
-    if (this.progressTicker || !this.options.channel.editMessage) {
-      return;
-    }
-
-    this.progressTicker = setInterval(() => {
-      if (
-        this.progressMessageId &&
-        this.latestProgressText &&
-        !this.progressCreating
-      ) {
-        void this.syncTrackedProgressMessage();
-      }
-    }, 5_000);
   }
 
   private async finalizeProgressMessage(): Promise<void> {
+    this.progressEdits.stop();
     this.log.info(
       {
         progressMessageId: this.progressMessageId,
@@ -629,7 +619,7 @@ export class MessageTurnController {
       },
       'Finalizing tracked progress message',
     );
-    await this.syncTrackedProgressMessage();
+    await this.progressEdits.request();
     this.resetProgressState();
   }
 
@@ -643,6 +633,10 @@ export class MessageTurnController {
     if (options?.flushPendingText) {
       await this.flushPendingProgress(options.flushPendingText);
     }
+
+    this.progressEdits.stop();
+    this.progressEdits.cancelPending();
+    await this.progressEdits.waitForIdle();
 
     const hasAttachments = (options?.attachments?.length ?? 0) > 0;
     const replaceMessageId = hasAttachments
@@ -788,7 +782,7 @@ export class MessageTurnController {
         },
         'Updating tracked progress message',
       );
-      await this.syncTrackedProgressMessage();
+      await this.progressEdits.request();
       this.visiblePhase = toVisiblePhase('progress');
       return;
     }
@@ -841,7 +835,7 @@ export class MessageTurnController {
         textLength: text.length,
         renderedLength: rendered.length,
       });
-      this.ensureProgressTicker();
+      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
       this.visiblePhase = toVisiblePhase('progress');
       return;
     }

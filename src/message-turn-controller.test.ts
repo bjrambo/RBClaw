@@ -63,6 +63,12 @@ async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 10; index++) {
+    await Promise.resolve();
+  }
+}
+
 function getAuditEntries(): Array<Record<string, unknown>> {
   return vi
     .mocked(logger.info)
@@ -258,11 +264,7 @@ describe('MessageTurnController outbound audit logging', () => {
 
     expect(finishResult.visiblePhase).toBe('progress');
     expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
-    expect(channel.editMessage).toHaveBeenCalledWith(
-      'dc:test-room',
-      'progress-1',
-      expect.stringContaining('확인하겠습니다.'),
-    );
+    expect(channel.editMessage).not.toHaveBeenCalled();
     expect(deliverFinalText).not.toHaveBeenCalled();
     expect(getAuditEntries()).not.toEqual(
       expect.arrayContaining([
@@ -701,6 +703,222 @@ describe('MessageTurnController stale owner turn delivery suppression', () => {
     expect(finishResult.deliverySucceeded).toBe(true);
     expect(channel.sendAndTrack).not.toHaveBeenCalled();
     expect(channel.sendMessage).not.toHaveBeenCalled();
+    expect(deliverFinalText).not.toHaveBeenCalled();
+  });
+});
+
+describe('MessageTurnController progress edit serialization', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('keeps the normal immediate progress edit and final replacement flow', async () => {
+    const channel = { ...makeChannel(), name: 'discord' } satisfies Channel;
+    const deliverFinalText = vi.fn().mockResolvedValue(true);
+    const controller = new MessageTurnController({
+      chatJid: 'dc:test-room',
+      group: makeGroup(),
+      runId: 'run-owner-normal-progress-edit',
+      channel,
+      idleTimeout: 1_000,
+      failureFinalText: '실패',
+      isClaudeCodeAgent: true,
+      clearSession: vi.fn(),
+      requestClose: vi.fn(),
+      deliverFinalText,
+      deliveryRole: 'owner',
+    });
+
+    await controller.start();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '첫 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '둘째 진행 상황',
+    } as any);
+    await flushAsync();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'intermediate',
+      result: '셋째 진행 상황',
+    } as any);
+    await flushAsync();
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'dc:test-room',
+      'progress-1',
+      expect.stringContaining('셋째 진행 상황'),
+    );
+
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'final',
+      result: 'DONE 최종 답변',
+    } as any);
+    await controller.finish('success');
+
+    expect(deliverFinalText).toHaveBeenCalledWith('DONE 최종 답변', {
+      replaceMessageId: 'progress-1',
+    });
+  });
+
+  it('serializes unresolved edits and coalesces queued updates to the latest progress', async () => {
+    const channel = { ...makeChannel(), name: 'discord' } satisfies Channel;
+    const deliverFinalText = vi.fn().mockResolvedValue(true);
+    let activeEdits = 0;
+    let maxActiveEdits = 0;
+    const resolveEdits: Array<() => void> = [];
+    vi.mocked(channel.editMessage!).mockImplementation(
+      async (_chatJid, _messageId, _text) => {
+        activeEdits++;
+        maxActiveEdits = Math.max(maxActiveEdits, activeEdits);
+        await new Promise<void>((resolve) => resolveEdits.push(resolve));
+        activeEdits--;
+      },
+    );
+    const controller = new MessageTurnController({
+      chatJid: 'dc:test-room',
+      group: makeGroup(),
+      runId: 'run-owner-slow-progress-edit',
+      channel,
+      idleTimeout: 60_000,
+      failureFinalText: '실패',
+      isClaudeCodeAgent: true,
+      clearSession: vi.fn(),
+      requestClose: vi.fn(),
+      deliverFinalText,
+      deliveryRole: 'owner',
+    });
+
+    await controller.start();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '첫 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '둘째 진행 상황',
+    } as any);
+    await flushAsync();
+    expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
+
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'intermediate',
+      result: '셋째 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'intermediate',
+      result: '넷째 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'intermediate',
+      result: '마지막 진행 상황',
+    } as any);
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(activeEdits).toBe(1);
+    expect(maxActiveEdits).toBe(1);
+
+    resolveEdits.shift()?.();
+    await flushMicrotasks();
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
+    expect(channel.editMessage).toHaveBeenLastCalledWith(
+      'dc:test-room',
+      'progress-1',
+      expect.stringContaining('마지막 진행 상황'),
+    );
+    expect(maxActiveEdits).toBe(1);
+
+    const finalPromise = controller.handleOutput({
+      status: 'success',
+      phase: 'final',
+      result: 'DONE 최종 답변',
+    } as any);
+    await flushMicrotasks();
+    expect(deliverFinalText).not.toHaveBeenCalled();
+
+    resolveEdits.shift()?.();
+    await flushMicrotasks();
+    await finalPromise;
+    await controller.finish('success');
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
+    expect(maxActiveEdits).toBe(1);
+    expect(deliverFinalText).toHaveBeenCalledWith('DONE 최종 답변', {
+      replaceMessageId: 'progress-1',
+    });
+  });
+
+  it('waits for an in-flight edit before finalizing reviewer progress', async () => {
+    const channel = makeChannel();
+    const deliverFinalText = vi.fn().mockResolvedValue(true);
+    let resolveEdit!: () => void;
+    const editBlocked = new Promise<void>((resolve) => {
+      resolveEdit = resolve;
+    });
+    vi.mocked(channel.editMessage!).mockImplementation(async () => {
+      await editBlocked;
+    });
+    const controller = new MessageTurnController({
+      chatJid: 'dc:test-room',
+      group: makeGroup(),
+      runId: 'run-reviewer-progress-finalize',
+      channel,
+      idleTimeout: 1_000,
+      failureFinalText: '실패',
+      isClaudeCodeAgent: true,
+      clearSession: vi.fn(),
+      requestClose: vi.fn(),
+      deliverFinalText,
+      allowProgressReplayWithoutFinal: false,
+      deliveryRole: 'reviewer',
+      pairedTurnIdentity: makeTurnIdentity(),
+    });
+
+    await controller.start();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '첫 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '둘째 진행 상황',
+    } as any);
+    await flushAsync();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '최종 진행 상황',
+    } as any);
+
+    let finishSettled = false;
+    const finishPromise = controller.finish('success').then((result) => {
+      finishSettled = true;
+      return result;
+    });
+    await Promise.resolve();
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(finishSettled).toBe(false);
+
+    resolveEdit();
+    await finishPromise;
+
+    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(finishSettled).toBe(true);
     expect(deliverFinalText).not.toHaveBeenCalled();
   });
 });
