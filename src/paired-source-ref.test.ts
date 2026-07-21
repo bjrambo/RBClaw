@@ -39,6 +39,24 @@ describe('direct work directory source references', () => {
     return workDir;
   }
 
+  function createNestedRepository(parentDir: string): string {
+    const nestedDir = path.join(parentDir, 'modules', 'management');
+    fs.mkdirSync(nestedDir, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: nestedDir });
+    execFileSync('git', ['config', 'user.name', 'RBClaw Test'], {
+      cwd: nestedDir,
+    });
+    execFileSync('git', ['config', 'user.email', 'rbclaw@example.test'], {
+      cwd: nestedDir,
+    });
+    fs.writeFileSync(path.join(nestedDir, 'nested.txt'), 'initial\n');
+    execFileSync('git', ['add', 'nested.txt'], { cwd: nestedDir });
+    execFileSync('git', ['commit', '--quiet', '-m', 'Nested commit'], {
+      cwd: nestedDir,
+    });
+    return nestedDir;
+  }
+
   it('detects tracked and untracked changes without a generated branch', () => {
     const workDir = createRepository();
     const sourceRef = resolveCanonicalSourceRef(workDir);
@@ -62,5 +80,23 @@ describe('direct work directory source references', () => {
 
     expect(resolveCanonicalSourceRef(workDir)).toBe('HEAD');
     expect(hasCodeChangesSinceRef(workDir, 'HEAD')).toBe(null);
+  });
+
+  it('fingerprints nested repositories without treating them as permanent changes', () => {
+    const workDir = createRepository();
+    const nestedDir = createNestedRepository(workDir);
+    const sourceRef = resolveCanonicalSourceRef(workDir);
+
+    expect(sourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(false);
+
+    fs.writeFileSync(path.join(nestedDir, 'nested.txt'), 'changed\n');
+    expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(true);
+
+    execFileSync('git', ['checkout', '--', 'nested.txt'], { cwd: nestedDir });
+    expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(false);
+
+    fs.writeFileSync(path.join(nestedDir, 'untracked.txt'), 'new\n');
+    expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(true);
   });
 });

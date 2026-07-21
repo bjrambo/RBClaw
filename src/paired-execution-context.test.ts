@@ -108,6 +108,29 @@ function createCanonicalRepoWithCommit(commitMessage: string): string {
   return repoDir;
 }
 
+function createNestedRepoWithCommit(parentDir: string): void {
+  const repoDir = path.join(parentDir, 'modules', 'management');
+  fs.mkdirSync(repoDir, { recursive: true });
+  execFileSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Test User'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  });
+  fs.writeFileSync(path.join(repoDir, 'nested.txt'), 'nested\n');
+  execFileSync('git', ['add', 'nested.txt'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  });
+  execFileSync('git', ['commit', '-m', 'nested'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  });
+}
+
 function resolveTreeRef(repoDir: string): string {
   return resolveCanonicalSourceRef(repoDir);
 }
@@ -550,6 +573,33 @@ describe('paired execution context owner completion handling', () => {
       role: 'owner',
       status: 'succeeded',
       summary: 'DONE',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ status: 'completed' }),
+    );
+  });
+
+  it('completes owner finalize with an unchanged nested repository', () => {
+    const repoDir = createCanonicalRepoWithCommit('reviewed');
+    createNestedRepoWithCommit(repoDir);
+    const approvedSourceRef = resolveTreeRef(repoDir);
+
+    expect(approvedSourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'merge_ready',
+        work_dir: repoDir,
+        source_ref: approvedSourceRef,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'owner',
+      status: 'succeeded',
+      summary: 'TASK_DONE',
     });
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(

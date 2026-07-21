@@ -48,20 +48,58 @@ function resolveWorkDirFingerprint(workDir: string): string | null {
     hash.update(trackedDiff);
     hash.update('\0untracked\0');
     for (const relativePath of untrackedPaths) {
-      const filePath = path.join(workDir, relativePath);
-      const stat = fs.lstatSync(filePath);
-      hash.update(relativePath);
-      hash.update('\0');
-      hash.update(
-        stat.isSymbolicLink()
-          ? fs.readlinkSync(filePath)
-          : fs.readFileSync(filePath),
-      );
-      hash.update('\0');
+      updateHashForPath(hash, workDir, relativePath);
     }
     return `${WORK_DIR_FINGERPRINT_PREFIX}${hash.digest('hex')}`;
   } catch {
     return null;
+  }
+}
+
+function updateHashForPath(
+  hash: crypto.Hash,
+  rootDir: string,
+  relativePath: string,
+): void {
+  const filePath = path.join(rootDir, relativePath);
+  const stat = fs.lstatSync(filePath);
+  hash.update(relativePath);
+  hash.update('\0');
+
+  if (stat.isSymbolicLink()) {
+    hash.update(fs.readlinkSync(filePath));
+  } else if (stat.isFile()) {
+    hash.update(fs.readFileSync(filePath));
+  } else if (stat.isDirectory()) {
+    const nestedFingerprint = isGitRepositoryRoot(filePath)
+      ? resolveWorkDirFingerprint(filePath)
+      : null;
+    if (nestedFingerprint) {
+      hash.update(`git-directory\0${nestedFingerprint}`);
+    } else {
+      hash.update('directory\0');
+      for (const entry of fs.readdirSync(filePath).sort()) {
+        if (entry === '.git') continue;
+        updateHashForPath(hash, rootDir, path.join(relativePath, entry));
+      }
+    }
+  } else {
+    hash.update(`other\0${stat.mode}\0${stat.size}`);
+  }
+
+  hash.update('\0');
+}
+
+function isGitRepositoryRoot(directoryPath: string): boolean {
+  try {
+    const topLevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: directoryPath,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return fs.realpathSync(topLevel) === fs.realpathSync(directoryPath);
+  } catch {
+    return false;
   }
 }
 
