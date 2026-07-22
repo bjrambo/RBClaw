@@ -565,8 +565,8 @@ export class MessageTurnController {
 
     const progressMessageId = this.progressMessageId;
     const latestProgressText = this.latestProgressText;
-    const editMessage = this.options.channel.editMessage;
-    if (!progressMessageId || !editMessage || !latestProgressText) {
+    const channel = this.options.channel;
+    if (!progressMessageId || !channel.editMessage || !latestProgressText) {
       return;
     }
 
@@ -576,7 +576,11 @@ export class MessageTurnController {
     }
 
     try {
-      await editMessage(this.options.chatJid, progressMessageId, rendered);
+      await channel.editMessage(
+        this.options.chatJid,
+        progressMessageId,
+        rendered,
+      );
       if (this.progressMessageId === progressMessageId) {
         this.latestProgressRendered = rendered;
         this.progressEditFailCount = 0;

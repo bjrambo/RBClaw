@@ -767,6 +767,60 @@ describe('MessageTurnController progress edit serialization', () => {
     });
   });
 
+  it('preserves the channel receiver when editing tracked progress', async () => {
+    const observeReceiver = vi.fn();
+    const editMessage = vi.fn(async function (this: Channel): Promise<void> {
+      observeReceiver(this);
+    });
+    const channel = {
+      ...makeChannel(),
+      name: 'discord',
+      editMessage,
+    } satisfies Channel;
+    const controller = new MessageTurnController({
+      chatJid: 'dc:test-room',
+      group: makeGroup(),
+      runId: 'run-owner-channel-receiver',
+      channel,
+      idleTimeout: 1_000,
+      failureFinalText: '실패',
+      isClaudeCodeAgent: true,
+      clearSession: vi.fn(),
+      requestClose: vi.fn(),
+      deliverFinalText: vi.fn().mockResolvedValue(true),
+      deliveryRole: 'owner',
+    });
+
+    await controller.start();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '첫 진행 상황',
+    } as any);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: '둘째 진행 상황',
+    } as any);
+    await flushAsync();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'intermediate',
+      result: '셋째 진행 상황',
+    } as any);
+    await flushAsync();
+
+    expect(editMessage).toHaveBeenCalledTimes(1);
+    expect(observeReceiver).toHaveBeenCalledWith(channel);
+
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'final',
+      result: 'DONE 최종 답변',
+    } as any);
+    await controller.finish('success');
+  });
+
   it('serializes unresolved edits and coalesces queued updates to the latest progress', async () => {
     const channel = { ...makeChannel(), name: 'discord' } satisfies Channel;
     const deliverFinalText = vi.fn().mockResolvedValue(true);
