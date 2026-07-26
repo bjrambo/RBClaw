@@ -220,6 +220,33 @@ function resetSchedulerTestState(): void {
 describe('paired follow-up scheduler: dedup and turn identity', () => {
   beforeEach(resetSchedulerTestState);
 
+  it.each([
+    'waiting_retry',
+    'waiting_external',
+    'waiting_user',
+    'parked',
+    'terminal',
+  ] as const)('does not enqueue tasks in %s supervisor state', (state) => {
+    const enqueue = vi.fn();
+    const scheduled = schedulePairedFollowUpOnce({
+      chatJid: 'group@test',
+      runId: `run-${state}`,
+      task: {
+        id: `task-${state}`,
+        status: state === 'terminal' ? 'completed' : 'review_ready',
+        round_trip_count: 1,
+        updated_at: '2026-03-30T00:00:00.000Z',
+        supervisor_state: state,
+        resume_at:
+          state === 'waiting_retry' ? '2099-03-30T00:00:00.000Z' : null,
+      },
+      intentKind: 'reviewer-turn',
+      enqueue,
+    });
+    expect(scheduled).toBe(false);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('deduplicates the same follow-up intent while task state is unchanged', () => {
     const enqueue = vi.fn();
     const task = {

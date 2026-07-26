@@ -1,10 +1,15 @@
 import { CronExpressionParser } from 'cron-parser';
 import { normalizeTaskContextMode } from 'rbclaw-runners-shared';
 
-import { createTask, findDuplicateCiWatcher } from '../db.js';
+import {
+  createTask,
+  findDuplicateCiWatcher,
+  getPairedTaskById,
+} from '../db.js';
 import { normalizeStoredAgentType } from '../db/room-registration.js';
 import { TIMEZONE } from '../config.js';
 import { logger } from '../logger.js';
+import { transitionPairedSupervisorState } from '../paired-supervisor-state.js';
 import {
   DEFAULT_WATCH_CI_MAX_DURATION_MS,
   isWatchCiTask,
@@ -68,6 +73,10 @@ export function handleScheduleTask(
     max_duration_ms: isWatchCiTask({ prompt: data.prompt })
       ? DEFAULT_WATCH_CI_MAX_DURATION_MS
       : null,
+    paired_task_id: data.paired_task_id ?? null,
+    external_wait_ref: data.external_wait_ref ?? null,
+    watcher_dedup_key: data.watcher_dedup_key ?? null,
+    terminal_event_applied_at: null,
     prompt: data.prompt,
     schedule_type: scheduleType,
     schedule_value: data.schedule_value,
@@ -76,6 +85,21 @@ export function handleScheduleTask(
     status: 'active',
     created_at: new Date().toISOString(),
   });
+  if (data.paired_task_id && data.external_wait_ref) {
+    const pairedTask = getPairedTaskById(data.paired_task_id);
+    if (pairedTask && pairedTask.status !== 'completed') {
+      transitionPairedSupervisorState({
+        task: pairedTask,
+        nextState: 'waiting_external',
+        reason: 'ci-watcher-created',
+        patch: {
+          last_blocker_class: 'external',
+          external_wait_ref: data.external_wait_ref,
+          resume_at: null,
+        },
+      });
+    }
+  }
   logger.info(
     {
       taskId,
@@ -157,6 +181,8 @@ function isDuplicateCiWatcher(
     targetJid,
     data.ci_provider,
     data.ci_metadata,
+    data.paired_task_id,
+    data.external_wait_ref,
   );
   if (!existing) return false;
 

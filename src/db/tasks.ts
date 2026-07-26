@@ -22,6 +22,10 @@ export type CreateScheduledTaskInput = Omit<
   | 'max_duration_ms'
   | 'status_message_id'
   | 'status_started_at'
+  | 'paired_task_id'
+  | 'external_wait_ref'
+  | 'watcher_dedup_key'
+  | 'terminal_event_applied_at'
 > & {
   agent_type?: AgentType | null;
   room_role?: PairedRoomRole | null;
@@ -30,6 +34,10 @@ export type CreateScheduledTaskInput = Omit<
   max_duration_ms?: number | null;
   status_message_id?: string | null;
   status_started_at?: string | null;
+  paired_task_id?: string | null;
+  external_wait_ref?: string | null;
+  watcher_dedup_key?: string | null;
+  terminal_event_applied_at?: string | null;
 };
 
 export type ScheduledTaskUpdates = Partial<
@@ -42,6 +50,7 @@ export type ScheduledTaskUpdates = Partial<
     | 'status'
     | 'suspended_until'
     | 'ci_metadata'
+    | 'terminal_event_applied_at'
   >
 >;
 
@@ -56,8 +65,8 @@ export function createTaskInDatabase(
   database
     .prepare(
       `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, agent_type, room_role, ci_provider, ci_metadata, max_duration_ms, status_message_id, status_started_at, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, agent_type, room_role, ci_provider, ci_metadata, max_duration_ms, status_message_id, status_started_at, paired_task_id, external_wait_ref, watcher_dedup_key, terminal_event_applied_at, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     )
     .run(
@@ -71,6 +80,10 @@ export function createTaskInDatabase(
       task.max_duration_ms ?? null,
       task.status_message_id || null,
       task.status_started_at || null,
+      task.paired_task_id ?? null,
+      task.external_wait_ref ?? null,
+      task.watcher_dedup_key ?? null,
+      task.terminal_event_applied_at ?? null,
       task.prompt,
       task.schedule_type,
       task.schedule_value,
@@ -96,7 +109,19 @@ export function findDuplicateCiWatcherInDatabase(
   chatJid: string,
   ciProvider: string,
   ciMetadata: string,
+  pairedTaskId?: string | null,
+  externalWaitRef?: string | null,
 ): ScheduledTask | undefined {
+  if (pairedTaskId && externalWaitRef) {
+    return database
+      .prepare(
+        `SELECT * FROM scheduled_tasks
+         WHERE paired_task_id = ? AND external_wait_ref = ?
+           AND status IN ('active', 'paused')
+         LIMIT 1`,
+      )
+      .get(pairedTaskId, externalWaitRef) as ScheduledTask | undefined;
+  }
   return database
     .prepare(
       `SELECT * FROM scheduled_tasks
@@ -180,6 +205,10 @@ export function updateTaskInDatabase(
     fields.push('ci_metadata = ?');
     values.push(updates.ci_metadata);
   }
+  if (updates.terminal_event_applied_at !== undefined) {
+    fields.push('terminal_event_applied_at = ?');
+    values.push(updates.terminal_event_applied_at);
+  }
 
   if (fields.length === 0) return;
 
@@ -225,6 +254,26 @@ export function hasActiveCiWatcherForChatInDatabase(
        LIMIT 1`,
     )
     .get(chatJid, `${WATCH_CI_PROMPT_PREFIX}%`);
+  return !!row;
+}
+
+export function hasActiveCiWatcherForGoalInDatabase(
+  database: Database,
+  chatJid: string,
+  pairedTaskId: string,
+): boolean {
+  const row = database
+    .prepare(
+      `SELECT 1 FROM scheduled_tasks
+       WHERE status = 'active'
+         AND prompt LIKE ?
+         AND (
+           paired_task_id = ?
+           OR (paired_task_id IS NULL AND chat_jid = ?)
+         )
+       LIMIT 1`,
+    )
+    .get(`${WATCH_CI_PROMPT_PREFIX}%`, pairedTaskId, chatJid);
   return !!row;
 }
 

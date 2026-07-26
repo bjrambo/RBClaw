@@ -20,6 +20,7 @@ import { SCHEDULED_TASK_ROOM_ROLE_MIGRATION } from './017_scheduled-task-room-ro
 import { PAIRED_TURN_OUTPUT_ATTACHMENTS_MIGRATION } from './018_paired-turn-output-attachments.js';
 import { MESSAGE_METADATA_MIGRATION } from './019_message-metadata.js';
 import { DIRECT_ROOM_WORKDIR_MIGRATION } from './020_direct-room-workdir.js';
+import { PERSISTENT_SUPERVISOR_MIGRATION } from './021_persistent-supervisor.js';
 import type {
   SchemaMigrationArgs,
   SchemaMigrationDefinition,
@@ -48,6 +49,7 @@ const ORDERED_SCHEMA_MIGRATIONS: readonly SchemaMigrationDefinition[] = [
   PAIRED_TURN_OUTPUT_ATTACHMENTS_MIGRATION,
   MESSAGE_METADATA_MIGRATION,
   DIRECT_ROOM_WORKDIR_MIGRATION,
+  PERSISTENT_SUPERVISOR_MIGRATION,
 ];
 
 function ensureSchemaMigrationsTable(database: Database): void {

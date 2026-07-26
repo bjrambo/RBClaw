@@ -39,8 +39,10 @@ import {
   getOpenWorkItemForChatFromDatabase,
   getOpenWorkItemFromDatabase,
   getRecentDeliveredWorkItemsForChatFromDatabase,
+  getWorkItemByIdFromDatabase,
   markWorkItemDeliveredInDatabase,
   markWorkItemDeliveryRetryInDatabase,
+  markWorkItemDeliveryUncertainInDatabase,
 } from './work-items.js';
 
 /** @internal - for tests only. */
@@ -284,6 +286,10 @@ export function getOpenWorkItemForChat(
   );
 }
 
+export function getWorkItemById(id: number): WorkItem | undefined {
+  return getWorkItemByIdFromDatabase(requireDatabase(), id);
+}
+
 export function getRecentDeliveredWorkItemsForChat(
   chatJid: string,
   limit: number = 8,
@@ -303,11 +309,18 @@ export function createProducedWorkItem(
 
 export function markWorkItemDelivered(
   id: number,
-  deliveryMessageId?: string | null,
+  delivery?:
+    | string
+    | null
+    | { primaryMessageId: string | null; messageIds: string[] },
 ): void {
-  markWorkItemDeliveredInDatabase(requireDatabase(), id, deliveryMessageId);
+  markWorkItemDeliveredInDatabase(requireDatabase(), id, delivery);
 }
 
 export function markWorkItemDeliveryRetry(id: number, error: string): void {
   markWorkItemDeliveryRetryInDatabase(requireDatabase(), id, error);
+}
+
+export function markWorkItemDeliveryUncertain(id: number, error: string): void {
+  markWorkItemDeliveryUncertainInDatabase(requireDatabase(), id, error);
 }

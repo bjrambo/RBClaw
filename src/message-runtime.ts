@@ -72,6 +72,7 @@ function createRuntimeExecuteTurn(args: {
       forcedAgentType,
       deliveryRole,
       deliveryServiceId,
+      pairedTaskId,
       replaceMessageId,
     }) => {
       return deliverMessageRuntimeFinalText({
@@ -86,6 +87,7 @@ function createRuntimeExecuteTurn(args: {
         forcedAgentType,
         deliveryRole,
         deliveryServiceId,
+        pairedTaskId,
         replaceMessageId,
         hasDirectTerminalDeliveryForRun:
           deps.queue.hasDirectTerminalDeliveryForRun?.bind(deps.queue),

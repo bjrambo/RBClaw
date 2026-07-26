@@ -168,6 +168,7 @@ export function getRecoverablePendingPairedTurnReservationsFromDatabase(
        WHERE r.status = 'pending'
          AND l.task_id IS NULL
          AND t.status NOT IN ('completed', 'cancelled', 'failed')
+         AND COALESCE(t.supervisor_state, 'runnable') = 'runnable'
          AND r.task_status = t.status
          AND r.task_updated_at = t.updated_at
          AND (

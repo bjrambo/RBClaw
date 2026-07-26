@@ -138,6 +138,9 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       buildPairedTask({
         status: 'in_arbitration',
         round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 2,
+        total_round_trip_count: 9,
+        arbitration_count: 1,
         owner_step_done_streak: 3,
         finalize_step_done_count: 1,
         empty_step_done_streak: 4,
@@ -150,6 +153,11 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       role: 'arbiter',
       status: 'succeeded',
       summary: 'PROCEED\nReviewer should approve.',
+      arbiterDirective: {
+        verdict: 'proceed',
+        requirements: [],
+        blockers: [],
+      },
     });
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(
@@ -157,6 +165,10 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       expect.objectContaining({
         status: 'review_ready',
         round_trip_count: 0,
+        episode_number: 3,
+        total_round_trip_count: 9,
+        arbitration_count: 1,
+        supervisor_state: 'runnable',
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         finalize_step_done_count: 0,
@@ -172,6 +184,9 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       buildPairedTask({
         status: 'in_arbitration',
         round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 4,
+        total_round_trip_count: 12,
+        arbitration_count: 2,
         owner_failure_count: 1,
         owner_step_done_streak: 3,
         finalize_step_done_count: 1,
@@ -185,6 +200,13 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       role: 'arbiter',
       status: 'succeeded',
       summary: 'ESCALATE\nUser should approve the prod release.',
+      arbiterDirective: {
+        verdict: 'escalate',
+        requirements: [],
+        blockers: [
+          { id: 'user-approval', scope: 'production', action: 'approve' },
+        ],
+      },
     });
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(
@@ -192,6 +214,11 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
       expect.objectContaining({
         status: 'active',
         round_trip_count: 0,
+        episode_number: 5,
+        total_round_trip_count: 12,
+        arbitration_count: 2,
+        supervisor_state: 'waiting_user',
+        last_blocker_class: 'user_input',
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         finalize_step_done_count: 0,
@@ -203,11 +230,14 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
     );
   });
 
-  it('escalates unknown arbiter verdicts instead of treating them as approval', () => {
+  it('requests one correction when the Arbiter directive is missing', () => {
     vi.mocked(db.getPairedTaskById).mockReturnValue(
       buildPairedTask({
         status: 'in_arbitration',
         round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 7,
+        total_round_trip_count: 14,
+        arbitration_count: 2,
         owner_step_done_streak: 3,
         empty_step_done_streak: 4,
         arbiter_requested_at: '2026-03-28T00:00:01.000Z',
@@ -224,9 +254,38 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({
-        status: 'completed',
-        arbiter_verdict: 'unknown',
-        completion_reason: 'arbiter_escalated',
+        status: 'arbiter_requested',
+        owner_failure_count: 1,
+        last_blocker_class: 'protocol',
+      }),
+    );
+  });
+
+  it('waits for the user after a repeated missing Arbiter directive', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_arbitration',
+        owner_failure_count: 1,
+        round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        total_round_trip_count: 14,
+        arbitration_count: 2,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'arbiter',
+      status: 'succeeded',
+      summary: 'REVISE\nStill no structured directive.',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'active',
+        supervisor_state: 'waiting_user',
+        owner_failure_count: 2,
+        last_blocker_class: 'protocol',
       }),
     );
   });
@@ -325,11 +384,41 @@ describe('paired execution routing loop guards: terminal failures and owner revi
     );
   });
 
+  it('parks hard turn timeouts in waiting_retry instead of immediately retrying', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_review',
+        retry_count: 1,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'reviewer',
+      status: 'failed',
+      summary: 'Agent hard turn timeout after 7200000ms',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'review_ready',
+        supervisor_state: 'waiting_retry',
+        retry_count: 2,
+        last_blocker_class: 'timeout',
+        resume_at: expect.any(String),
+      }),
+    );
+  });
+
   it('keeps arbiter REVISE on owner flow while clearing stale loop counters', () => {
     vi.mocked(db.getPairedTaskById).mockReturnValue(
       buildPairedTask({
         status: 'in_arbitration',
         round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 7,
+        total_round_trip_count: 14,
+        arbitration_count: 2,
         owner_step_done_streak: 3,
         empty_step_done_streak: 4,
         arbiter_requested_at: '2026-03-28T00:00:01.000Z',
@@ -341,16 +430,67 @@ describe('paired execution routing loop guards: terminal failures and owner revi
       role: 'arbiter',
       status: 'succeeded',
       summary: 'REVISE\nOwner must fix this.',
+      arbiterDirective: {
+        verdict: 'revise',
+        requirements: [
+          { id: 'fix', scope: 'owner', action: 'correct-implementation' },
+        ],
+        blockers: [],
+      },
     });
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({
         status: 'active',
+        round_trip_count: 0,
+        episode_number: 8,
+        total_round_trip_count: 14,
+        arbitration_count: 2,
+        supervisor_state: 'runnable',
         owner_step_done_streak: 0,
         empty_step_done_streak: 0,
         arbiter_verdict: 'revise',
         arbiter_requested_at: null,
+      }),
+    );
+  });
+
+  it('starts a new episode after arbiter RESET without resetting goal totals', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_arbitration',
+        round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 3,
+        total_round_trip_count: 11,
+        arbitration_count: 2,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'arbiter',
+      status: 'succeeded',
+      summary: 'RESET\nStart a fresh episode with the same goal.',
+      arbiterDirective: {
+        verdict: 'reset',
+        requirements: [
+          { id: 'restart', scope: 'episode', action: 'restart-strategy' },
+        ],
+        blockers: [],
+      },
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'active',
+        round_trip_count: 0,
+        episode_number: 4,
+        total_round_trip_count: 11,
+        arbitration_count: 2,
+        supervisor_state: 'runnable',
+        arbiter_verdict: 'reset',
       }),
     );
   });

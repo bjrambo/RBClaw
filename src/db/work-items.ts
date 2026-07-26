@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -25,6 +25,7 @@ export interface WorkItem {
   agent_type: AgentType;
   service_id: string;
   delivery_role?: PairedRoomRole | null;
+  paired_task_id?: string | null;
   status: 'produced' | 'delivery_retry' | 'delivered';
   start_seq: number | null;
   end_seq: number | null;
@@ -32,6 +33,10 @@ export interface WorkItem {
   attachments?: OutboundAttachment[];
   delivery_attempts: number;
   delivery_message_id: string | null;
+  delivery_key?: string | null;
+  delivery_receipts?: string | null;
+  delivery_uncertain?: number;
+  delivery_claimed_at?: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -53,6 +58,8 @@ export interface CreateProducedWorkItemInput {
   agent_type?: AgentType;
   service_id?: string;
   delivery_role?: PairedRoomRole | null;
+  paired_task_id?: string | null;
+  delivery_key_seed?: string | null;
   start_seq: number | null;
   end_seq: number | null;
   result_payload: string;
@@ -350,6 +357,7 @@ export function getOpenWorkItemFromDatabase(
        FROM work_items
        WHERE chat_jid = ? AND agent_type = ?
          AND status IN ('produced', 'delivery_retry')
+         AND delivery_uncertain = 0
          AND (
            service_id = ?
            OR (? IS NOT NULL AND delivery_role = ?)
@@ -391,6 +399,7 @@ export function getOpenWorkItemForChatFromDatabase(
        FROM work_items
        WHERE chat_jid = ?
          AND status IN ('produced', 'delivery_retry')
+         AND delivery_uncertain = 0
          AND (
            service_id = ?
            OR (? IS NOT NULL AND delivery_role = ?)
@@ -415,6 +424,16 @@ export function getOpenWorkItemForChatFromDatabase(
       preferredRole,
       preferredRole,
     ) as StoredWorkItemRow | undefined;
+  return row ? hydrateWorkItemRow(row) : undefined;
+}
+
+export function getWorkItemByIdFromDatabase(
+  database: Database,
+  id: number,
+): WorkItem | undefined {
+  const row = database
+    .prepare('SELECT * FROM work_items WHERE id = ?')
+    .get(id) as StoredWorkItemRow | undefined;
   return row ? hydrateWorkItemRow(row) : undefined;
 }
 
@@ -505,6 +524,7 @@ export function createProducedWorkItemInDatabase(
            agent_type,
            service_id,
            delivery_role,
+           paired_task_id,
            status,
            start_seq,
            end_seq,
@@ -513,7 +533,7 @@ export function createProducedWorkItemInDatabase(
            delivery_attempts,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, 'produced', ?, ?, ?, ?, 0, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, 'produced', ?, ?, ?, ?, 0, ?, ?)`,
       )
       .run(
         input.group_folder,
@@ -521,6 +541,7 @@ export function createProducedWorkItemInDatabase(
         agentType,
         serviceId,
         input.delivery_role ?? null,
+        input.paired_task_id ?? null,
         input.start_seq,
         input.end_seq,
         resultPayload,
@@ -534,6 +555,23 @@ export function createProducedWorkItemInDatabase(
         id: number;
       }
     ).id;
+    const deliveryKey = createHash('sha256')
+      .update(
+        [
+          input.paired_task_id ?? 'standalone',
+          input.delivery_key_seed ??
+            `${input.chat_jid}:${input.start_seq}:${input.end_seq}`,
+          String(lastId),
+        ].join(':'),
+      )
+      .digest('hex');
+    database
+      .prepare(
+        `UPDATE work_items
+         SET delivery_key = ?, delivery_claimed_at = ?
+         WHERE id = ?`,
+      )
+      .run(deliveryKey, now, lastId);
     return hydrateWorkItemRow(
       database
         .prepare('SELECT * FROM work_items WHERE id = ?')
@@ -545,19 +583,35 @@ export function createProducedWorkItemInDatabase(
 export function markWorkItemDeliveredInDatabase(
   database: Database,
   id: number,
-  deliveryMessageId?: string | null,
+  delivery:
+    | string
+    | null
+    | undefined
+    | { primaryMessageId: string | null; messageIds: string[] },
 ): void {
   const now = new Date().toISOString();
+  const primaryMessageId =
+    typeof delivery === 'object' && delivery
+      ? delivery.primaryMessageId
+      : delivery;
+  const receipts =
+    typeof delivery === 'object' && delivery
+      ? JSON.stringify(delivery.messageIds)
+      : primaryMessageId
+        ? JSON.stringify([primaryMessageId])
+        : null;
   database
     .prepare(
       `UPDATE work_items
      SET status = 'delivered',
          delivered_at = ?,
          delivery_message_id = ?,
+         delivery_receipts = ?,
+         delivery_uncertain = 0,
          updated_at = ?
      WHERE id = ?`,
     )
-    .run(now, deliveryMessageId || null, now, id);
+    .run(now, primaryMessageId || null, receipts, now, id);
 }
 
 export function markWorkItemDeliveryRetryInDatabase(
@@ -574,6 +628,23 @@ export function markWorkItemDeliveryRetryInDatabase(
          last_error = ?,
          updated_at = ?
      WHERE id = ?`,
+    )
+    .run(error, now, id);
+}
+
+export function markWorkItemDeliveryUncertainInDatabase(
+  database: Database,
+  id: number,
+  error: string,
+): void {
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `UPDATE work_items
+       SET delivery_uncertain = 1,
+           last_error = ?,
+           updated_at = ?
+       WHERE id = ?`,
     )
     .run(error, now, id);
 }

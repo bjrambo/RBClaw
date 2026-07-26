@@ -5,6 +5,7 @@ import {
   normalizePairedRoomRoleOrNull,
   type PairedRoomRole,
   type TaskContextMode,
+  type ArbiterDirective,
 } from 'rbclaw-runners-shared';
 import type { VisibleVerdict } from './paired-verdict.js';
 
@@ -14,6 +15,7 @@ export {
   normalizePairedRoomRole,
   normalizePairedRoomRoleOrNull,
   type PairedRoomRole,
+  type ArbiterDirective,
 };
 
 export interface AgentConfig {
@@ -66,6 +68,8 @@ export interface OutboundAttachment {
 
 export interface SendMessageOptions {
   attachments?: OutboundAttachment[];
+  /** Stable provider idempotency identity for retried persisted delivery. */
+  deliveryKey?: string;
   /**
    * Extra realpath roots that are valid for this delivery attempt. Runtime
    * callers can pass the configured project directory without widening
@@ -104,6 +108,27 @@ export type PairedTurnReservationIntentKind =
 
 export type ArbiterVerdict = 'proceed' | 'revise' | 'reset' | 'escalate';
 
+export type PairedSupervisorState =
+  | 'runnable'
+  | 'waiting_retry'
+  | 'waiting_external'
+  | 'waiting_user'
+  | 'parked'
+  | 'terminal';
+
+export type PairedBlockerClass =
+  | 'provider'
+  | 'network'
+  | 'authentication'
+  | 'authorization'
+  | 'requirements'
+  | 'external'
+  | 'timeout'
+  | 'protocol'
+  | 'stagnation'
+  | 'user_input'
+  | 'unknown';
+
 export interface RoomRoleContext {
   serviceId: string;
   role: PairedRoomRole;
@@ -131,6 +156,19 @@ export interface PairedTask {
   plan_notes: string | null;
   review_requested_at: string | null;
   round_trip_count: number;
+  episode_number?: number | null;
+  total_round_trip_count?: number | null;
+  arbitration_count?: number | null;
+  stagnation_count?: number | null;
+  progress_fingerprint?: string | null;
+  last_blocker_class?: PairedBlockerClass | null;
+  resume_at?: string | null;
+  supervisor_state?: PairedSupervisorState | null;
+  supervisor_state_changed_at?: string | null;
+  last_arbiter_directive_fingerprint?: string | null;
+  last_arbiter_directive_json?: string | null;
+  retry_count?: number | null;
+  external_wait_ref?: string | null;
   owner_failure_count?: number | null;
   owner_step_done_streak?: number | null;
   finalize_step_done_count?: number | null;
@@ -152,6 +190,8 @@ export interface PairedTurnOutput {
   output_text: string;
   attachments?: OutboundAttachment[];
   verdict?: VisibleVerdict | null;
+  arbiter_directive_json?: string | null;
+  arbiter_directive_fingerprint?: string | null;
   created_at: string;
 }
 
@@ -162,6 +202,8 @@ export type StructuredAgentOutput =
       visibility: 'public';
       text: string;
       attachments?: OutboundAttachment[];
+      arbiterDirective?: ArbiterDirective;
+      protocolError?: 'arbiter-verdict-mismatch';
     }
   | {
       visibility: 'silent';
@@ -254,6 +296,10 @@ export interface ScheduledTask {
   max_duration_ms?: number | null;
   status_message_id: string | null;
   status_started_at: string | null;
+  paired_task_id?: string | null;
+  external_wait_ref?: string | null;
+  watcher_dedup_key?: string | null;
+  terminal_event_applied_at?: string | null;
   prompt: string;
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
@@ -303,6 +349,8 @@ export interface Channel {
   // Optional: whether a stored inbound message was authored by this channel's own bot/user.
   isOwnMessage?(msg: NewMessage): boolean;
   disconnect(): Promise<void>;
+  /** True when sendMessage retries with deliveryKey cannot create duplicates. */
+  supportsIdempotentDelivery?(): boolean;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: edit/delete messages (used by status dashboard and tracked progress cleanup).

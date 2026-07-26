@@ -10,6 +10,7 @@ import type {
   PairedTaskStatus,
   PairedTurnReservationIntentKind,
 } from './types.js';
+import { isPairedTaskRunnable } from './paired-supervisor-state.js';
 
 export type ScheduledPairedFollowUpIntentKind =
   | 'reviewer-turn'
@@ -19,7 +20,12 @@ export type ScheduledPairedFollowUpIntentKind =
 
 type ScheduledPairedFollowUpTask = Pick<
   PairedTask,
-  'id' | 'status' | 'round_trip_count' | 'updated_at'
+  | 'id'
+  | 'status'
+  | 'round_trip_count'
+  | 'updated_at'
+  | 'supervisor_state'
+  | 'resume_at'
 >;
 
 const enqueuedPendingReservationKeys = new Set<string>();
@@ -49,6 +55,9 @@ export function schedulePairedFollowUpOnce(args: {
   intentKind: ScheduledPairedFollowUpIntentKind;
   enqueue: () => void;
 }): boolean {
+  if (!isPairedTaskRunnable(args.task)) {
+    return false;
+  }
   const reservationKey = buildPairedFollowUpKey({
     taskId: args.task.id,
     taskStatus: args.task.status,
@@ -82,6 +91,9 @@ export function claimPairedTurnExecution(args: {
   task: ScheduledPairedFollowUpTask;
   intentKind: PairedTurnReservationIntentKind;
 }): boolean {
+  if (!isPairedTaskRunnable(args.task)) {
+    return false;
+  }
   return claimPairedTurnReservation({
     chatJid: args.chatJid,
     taskId: args.task.id,

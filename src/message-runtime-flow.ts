@@ -35,6 +35,10 @@ import type {
   PairedTurnReservationIntentKind,
   RegisteredGroup,
 } from './types.js';
+import {
+  buildChecklistContinuationPrompt,
+  hasChecklistContinuation,
+} from './checklist-continuation.js';
 
 export type PendingPairedTurn = {
   prompt: string;
@@ -144,7 +148,8 @@ export function buildPendingPairedTurn(args: {
   const effectiveNextTurnAction =
     nextTurnAction.kind === 'none' &&
     taskStatus === 'active' &&
-    (task.owner_failure_count ?? 0) > 0
+    ((task.owner_failure_count ?? 0) > 0 ||
+      hasChecklistContinuation(task.plan_notes))
       ? ({ kind: 'owner-follow-up' } as const)
       : nextTurnAction;
   const taskContextMessages = getTaskContextMessages(chatJid, task);
@@ -205,17 +210,21 @@ export function buildPendingPairedTurn(args: {
   }
 
   if (effectiveNextTurnAction.kind === 'owner-follow-up') {
+    const checklistPrompt = buildChecklistContinuationPrompt(task.plan_notes);
+    const ownerPrompt = buildOwnerPendingPrompt({
+      chatJid,
+      timezone,
+      turnOutputs,
+      recentHumanMessages: taskContextMessages.filter(
+        (message) => !message.is_bot_message,
+      ),
+      lastHumanMessage,
+      taskCreatedAt: task.created_at,
+    });
     return {
-      prompt: buildOwnerPendingPrompt({
-        chatJid,
-        timezone,
-        turnOutputs,
-        recentHumanMessages: taskContextMessages.filter(
-          (message) => !message.is_bot_message,
-        ),
-        lastHumanMessage,
-        taskCreatedAt: task.created_at,
-      }),
+      prompt: checklistPrompt
+        ? `${checklistPrompt}\n\n${ownerPrompt}`
+        : ownerPrompt,
       channel: resolveChannel(taskStatus),
       cursor,
       taskId: task.id,
@@ -328,7 +337,8 @@ export function resolveBotOnlyPairedFollowUpAction(args: {
     pendingCursorSource?.seq ?? pendingCursorSource?.timestamp ?? null;
   const allowActiveOwnerFollowUp =
     task.status === 'active' &&
-    hasTrustedExternalSystemMessage(pendingMessages);
+    (hasTrustedExternalSystemMessage(pendingMessages) ||
+      hasChecklistContinuation(task.plan_notes));
   const { nextTurnAction, dispatch } = resolvePairedFollowUpDecision({
     task,
     source: 'bot-only-follow-up',

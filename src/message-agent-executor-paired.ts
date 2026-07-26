@@ -21,7 +21,16 @@ import type { PairedTurnIdentity } from './paired-turn-identity.js';
 import { resolvePairedTurnRunOwnership } from './paired-turn-run-ownership.js';
 import { isHumanMessageCloseReason } from './message-close-reasons.js';
 import { persistPairedTurnOutputAttachments } from './paired-turn-output-attachments.js';
-import type { OutboundAttachment, PairedRoomRole } from './types.js';
+import {
+  canonicalizeArbiterDirective,
+  fingerprintArbiterDirective,
+} from './paired-arbiter-directive.js';
+import type {
+  ArbiterDirective,
+  OutboundAttachment,
+  PairedRoomRole,
+} from './types.js';
+import { hasChecklistContinuation } from './checklist-continuation.js';
 
 type ExecutorLog = Pick<typeof logger, 'info' | 'warn'>;
 
@@ -54,6 +63,8 @@ function completeStoredExecution(
   status: 'succeeded' | 'failed',
   runId: string,
   summary: string | null,
+  arbiterDirective?: ArbiterDirective,
+  protocolError?: 'arbiter-verdict-mismatch',
 ): void {
   completePairedExecutionContext({
     taskId,
@@ -61,6 +72,8 @@ function completeStoredExecution(
     status,
     runId,
     summary,
+    arbiterDirective,
+    protocolError,
   });
 }
 
@@ -93,6 +106,8 @@ export interface PairedExecutionLifecycle {
   recordFinalOutputBeforeDelivery(
     outputText: string,
     attachments?: OutboundAttachment[],
+    arbiterDirective?: ArbiterDirective,
+    protocolError?: 'arbiter-verdict-mismatch',
   ): boolean;
   completeImmediately(args: { status: 'succeeded' | 'failed' }): void;
   markDelegated(): void;
@@ -129,6 +144,8 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
   private pairedExecutionSummary: string | null = null;
   private pairedFinalOutput: string | null = null;
   private pairedFinalAttachments: OutboundAttachment[] = [];
+  private pairedFinalArbiterDirective: ArbiterDirective | undefined;
+  private pairedFinalProtocolError: 'arbiter-verdict-mismatch' | undefined;
   private pairedSummaryLocked = false;
   private pairedExecutionCompleted = false;
   private pairedExecutionDelegated = false;
@@ -172,12 +189,19 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
   recordFinalOutputBeforeDelivery(
     outputText: string,
     attachments: OutboundAttachment[] = [],
+    arbiterDirective?: ArbiterDirective,
+    protocolError?: 'arbiter-verdict-mismatch',
   ): boolean {
     if (this.wasInterruptedByHumanMessage()) return false;
     if (!this.currentRunOwnsActiveAttempt('streamed-final-output')) {
       return false;
     }
-    this.lockVisibleVerdict(outputText, attachments);
+    this.lockVisibleVerdict(
+      outputText,
+      attachments,
+      arbiterDirective,
+      protocolError,
+    );
     this.completeSuccessfulOwnerTurnBeforeDeliveryIfNeeded();
     this.persistPairedTurnOutputIfNeeded();
     return true;
@@ -365,13 +389,31 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
             attachments: this.pairedFinalAttachments,
           })
         : [];
+    const directiveOptions = this.pairedFinalArbiterDirective
+      ? {
+          arbiterDirectiveJson: canonicalizeArbiterDirective(
+            this.pairedFinalArbiterDirective,
+          ),
+          arbiterDirectiveFingerprint: fingerprintArbiterDirective(
+            this.pairedFinalArbiterDirective,
+          ),
+        }
+      : {};
     if (attachments.length > 0) {
       insertPairedTurnOutput(
         pairedExecutionContext.task.id,
         turnNumber,
         completedRole,
         this.pairedFinalOutput,
-        { attachments },
+        { attachments, ...directiveOptions },
+      );
+    } else if (Object.keys(directiveOptions).length > 0) {
+      insertPairedTurnOutput(
+        pairedExecutionContext.task.id,
+        turnNumber,
+        completedRole,
+        this.pairedFinalOutput,
+        directiveOptions,
       );
     } else {
       insertPairedTurnOutput(
@@ -406,6 +448,8 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
       status: 'succeeded',
       runId,
       summary: this.pairedExecutionSummary,
+      arbiterDirective: this.pairedFinalArbiterDirective,
+      protocolError: this.pairedFinalProtocolError,
     });
     this.pairedExecutionCompleted = true;
   }
@@ -413,6 +457,8 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
   private lockVisibleVerdict(
     outputText: string,
     attachments: OutboundAttachment[] = [],
+    arbiterDirective?: ArbiterDirective,
+    protocolError?: 'arbiter-verdict-mismatch',
   ): void {
     if (outputText.length === 0) {
       return;
@@ -420,6 +466,8 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     if (!this.pairedFinalOutput || this.pairedFinalOutput.length === 0) {
       this.pairedFinalOutput = outputText;
       this.pairedFinalAttachments = attachments;
+      this.pairedFinalArbiterDirective = arbiterDirective;
+      this.pairedFinalProtocolError = protocolError;
     }
     if (!this.pairedSummaryLocked) {
       this.pairedExecutionSummary = outputText;
@@ -558,6 +606,8 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
       state.effectiveStatus,
       runId,
       this.pairedExecutionSummary,
+      this.pairedFinalArbiterDirective,
+      this.pairedFinalProtocolError,
     );
     this.pairedExecutionCompleted = true;
   }
@@ -617,6 +667,13 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     ) {
       return 'none';
     }
+    if (
+      completedRole === 'owner' &&
+      finishedTask?.status === 'active' &&
+      hasChecklistContinuation(finishedTask.plan_notes)
+    ) {
+      return 'pending';
+    }
     return resolvePairedFollowUpQueueAction({
       completedRole,
       executionStatus: state.effectiveStatus,
@@ -647,6 +704,9 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
         state.sawOutputForFollowUp && this.pairedExecutionSummary
           ? parseVisibleVerdict(this.pairedExecutionSummary)
           : null,
+      allowActiveOwnerFollowUp:
+        completedRole === 'owner' &&
+        hasChecklistContinuation(finishedTask.plan_notes),
       enqueueMessageCheck,
     });
   }

@@ -114,6 +114,7 @@ interface CreateExecuteTurnDeps {
     forcedAgentType?: AgentType;
     deliveryRole: PairedRoomRole | null;
     deliveryServiceId: string | null;
+    pairedTaskId?: string | null;
     replaceMessageId?: string | null;
   }) => Promise<boolean>;
   afterDeliverySuccess?: (args: {
@@ -240,6 +241,7 @@ export function createExecuteTurn(deps: CreateExecuteTurnDeps): ExecuteTurnFn {
             forcedAgentType: args.forcedAgentType,
             deliveryRole: resolvedDeliveryRole,
             deliveryServiceId: resolvedDeliveryServiceId,
+            pairedTaskId: args.pairedTurnIdentity?.taskId ?? null,
             replaceMessageId: options?.replaceMessageId ?? null,
           });
         } catch (err) {

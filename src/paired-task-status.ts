@@ -1,6 +1,26 @@
 import { updatePairedTaskIfUnchanged } from './db.js';
 import { logger } from './logger.js';
-import type { PairedTaskStatus } from './types.js';
+import type {
+  PairedBlockerClass,
+  PairedSupervisorState,
+  PairedTaskStatus,
+} from './types.js';
+
+interface PairedSupervisorPatch {
+  episode_number?: number;
+  total_round_trip_count?: number;
+  arbitration_count?: number;
+  stagnation_count?: number;
+  progress_fingerprint?: string | null;
+  last_blocker_class?: PairedBlockerClass | null;
+  resume_at?: string | null;
+  supervisor_state?: PairedSupervisorState;
+  supervisor_state_changed_at?: string | null;
+  last_arbiter_directive_fingerprint?: string | null;
+  last_arbiter_directive_json?: string | null;
+  retry_count?: number;
+  external_wait_ref?: string | null;
+}
 
 export const ALLOWED_PAIRED_STATUS_TRANSITIONS: Record<
   PairedTaskStatus,
@@ -55,7 +75,7 @@ export function transitionPairedTaskStatus(args: {
   nextStatus: PairedTaskStatus;
   expectedUpdatedAt: string;
   updatedAt: string;
-  patch?: {
+  patch?: PairedSupervisorPatch & {
     title?: string | null;
     source_ref?: string | null;
     plan_notes?: string | null;
@@ -81,6 +101,14 @@ export function transitionPairedTaskStatus(args: {
     args.expectedUpdatedAt,
     {
       ...args.patch,
+      ...(args.nextStatus === 'completed'
+        ? {
+            supervisor_state: 'terminal' as const,
+            supervisor_state_changed_at: args.updatedAt,
+            resume_at: null,
+            external_wait_ref: null,
+          }
+        : {}),
       status: args.nextStatus,
       updated_at: args.updatedAt,
     },
@@ -103,7 +131,7 @@ export function applyPairedTaskPatch(args: {
   taskId: string;
   expectedUpdatedAt: string;
   updatedAt: string;
-  patch: {
+  patch: PairedSupervisorPatch & {
     title?: string | null;
     source_ref?: string | null;
     plan_notes?: string | null;

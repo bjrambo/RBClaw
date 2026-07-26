@@ -32,6 +32,8 @@ export function insertPairedTurnOutputInDatabase(
   options: {
     createdAt?: string;
     attachments?: OutboundAttachment[];
+    arbiterDirectiveJson?: string | null;
+    arbiterDirectiveFingerprint?: string | null;
   } = {},
 ): void {
   if (outputText.length > MAX_TURN_OUTPUT_CHARS) {
@@ -50,8 +52,9 @@ export function insertPairedTurnOutputInDatabase(
   database
     .prepare(
       `INSERT OR REPLACE INTO paired_turn_outputs
-         (task_id, turn_number, role, output_text, attachment_payload, verdict, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (task_id, turn_number, role, output_text, attachment_payload, verdict,
+          arbiter_directive_json, arbiter_directive_fingerprint, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       taskId,
@@ -60,6 +63,8 @@ export function insertPairedTurnOutputInDatabase(
       storedOutputText(outputText),
       serializeAttachmentPayload(options.attachments),
       parseVisibleVerdict(outputText),
+      options.arbiterDirectiveJson ?? null,
+      options.arbiterDirectiveFingerprint ?? null,
       options.createdAt ?? new Date().toISOString(),
     );
 }

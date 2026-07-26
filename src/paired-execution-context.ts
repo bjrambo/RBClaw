@@ -47,6 +47,8 @@ import {
   transitionPairedTaskStatus,
 } from './paired-task-status.js';
 import { resolveCanonicalSourceRef } from './paired-source-ref.js';
+import { parkRetryablePairedFailure } from './paired-retry-policy.js';
+import { resolvePairedSupervisorState } from './paired-supervisor-state.js';
 import {
   buildPairedTurnIdentity,
   type PairedTurnIdentity,
@@ -289,6 +291,49 @@ export function resolveOwnerTaskForHumanMessage(args: {
   }
 
   if (existing.status !== 'merge_ready' || !canonicalWorkDir) {
+    const supervisorState = resolvePairedSupervisorState(existing);
+    if (
+      canonicalWorkDir &&
+      (supervisorState === 'waiting_user' || supervisorState === 'parked')
+    ) {
+      const now = new Date().toISOString();
+      applyPairedTaskPatch({
+        taskId: existing.id,
+        expectedUpdatedAt: existing.updated_at,
+        updatedAt: now,
+        patch: {
+          supervisor_state: 'runnable',
+          supervisor_state_changed_at: now,
+          episode_number: (existing.episode_number ?? 1) + 1,
+          round_trip_count: 0,
+          total_round_trip_count:
+            existing.total_round_trip_count ?? existing.round_trip_count,
+          arbitration_count: existing.arbitration_count ?? 0,
+          stagnation_count: 0,
+          last_blocker_class: null,
+          resume_at: null,
+          external_wait_ref: null,
+        },
+      });
+      return {
+        task: getPairedTaskById(existing.id) ?? {
+          ...existing,
+          supervisor_state: 'runnable',
+          supervisor_state_changed_at: now,
+          episode_number: (existing.episode_number ?? 1) + 1,
+          round_trip_count: 0,
+          total_round_trip_count:
+            existing.total_round_trip_count ?? existing.round_trip_count,
+          arbitration_count: existing.arbitration_count ?? 0,
+          stagnation_count: 0,
+          last_blocker_class: null,
+          resume_at: null,
+          external_wait_ref: null,
+          updated_at: now,
+        },
+        supersededTask: null,
+      };
+    }
     return {
       task: existing,
       supersededTask: null,
@@ -485,6 +530,7 @@ function prepareReadonlyRoleExecution(args: {
   now: string;
   pendingStatus: 'review_ready' | 'arbiter_requested';
   activeStatus: 'in_review' | 'in_arbitration';
+  incrementArbitrationCount?: boolean;
 }): { workDir: string; blockMessage?: string } {
   const { latestTask, now } = args;
   const workDir = resolveDirectWorkDir(latestTask.work_dir);
@@ -496,6 +542,11 @@ function prepareReadonlyRoleExecution(args: {
       nextStatus: args.activeStatus,
       expectedUpdatedAt: refreshedTask.updated_at,
       updatedAt: now,
+      patch: args.incrementArbitrationCount
+        ? {
+            arbitration_count: (refreshedTask.arbitration_count ?? 0) + 1,
+          }
+        : undefined,
     });
   }
   return { workDir };
@@ -621,6 +672,7 @@ export function preparePairedExecutionContext(args: {
       now,
       pendingStatus: 'arbiter_requested',
       activeStatus: 'in_arbitration',
+      incrementArbitrationCount: true,
     });
     workDir = arbiterPreparation.workDir;
     blockMessage = arbiterPreparation.blockMessage;
@@ -650,6 +702,8 @@ type CompletePairedExecutionContextArgs = {
   status: 'succeeded' | 'failed';
   runId?: string;
   summary?: string | null;
+  arbiterDirective?: import('./types.js').ArbiterDirective;
+  protocolError?: 'arbiter-verdict-mismatch';
 };
 
 export function completePairedExecutionContext(
@@ -707,6 +761,9 @@ function completePairedExecutionContextBody(
   }
 
   if (status !== 'succeeded') {
+    if (parkRetryablePairedFailure({ task, summary: args.summary })) {
+      return;
+    }
     if (role === 'reviewer') {
       handleFailedReviewerExecution({
         task,
@@ -739,7 +796,13 @@ function completePairedExecutionContextBody(
   }
 
   if (role === 'arbiter') {
-    handleArbiterCompletion({ task, taskId, summary: args.summary });
+    handleArbiterCompletion({
+      task,
+      taskId,
+      summary: args.summary,
+      arbiterDirective: args.arbiterDirective,
+      protocolError: args.protocolError,
+    });
   }
 }
 

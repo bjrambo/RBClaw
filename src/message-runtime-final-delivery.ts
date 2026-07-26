@@ -22,6 +22,7 @@ export async function deliverMessageRuntimeFinalText(args: {
   forcedAgentType?: AgentType;
   deliveryRole: PairedRoomRole | null;
   deliveryServiceId: string | null;
+  pairedTaskId?: string | null;
   replaceMessageId?: string | null;
   hasDirectTerminalDeliveryForRun?: (
     chatJid: string,
@@ -56,6 +57,8 @@ export async function deliverMessageRuntimeFinalText(args: {
     agent_type: args.forcedAgentType ?? args.group.agentType ?? 'claude-code',
     service_id: args.deliveryServiceId ?? undefined,
     delivery_role: args.deliveryRole,
+    paired_task_id: args.pairedTaskId ?? null,
+    delivery_key_seed: args.runId,
     start_seq: args.startSeq,
     end_seq: args.endSeq,
     result_payload: args.text,

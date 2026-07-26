@@ -17,6 +17,7 @@ import {
 import { getErrorMessage } from './utils.js';
 import type {
   AgentType,
+  ArbiterDirective,
   OutboundAttachment,
   RegisteredGroup,
   RoomRoleContext,
@@ -110,6 +111,8 @@ interface RunMessageAgentAttemptArgs {
     recordFinalOutputBeforeDelivery(
       outputText: string,
       attachments?: OutboundAttachment[],
+      arbiterDirective?: ArbiterDirective,
+      protocolError?: 'arbiter-verdict-mismatch',
     ): boolean;
   };
   log: Logger;
@@ -395,6 +398,12 @@ class MessageAgentAttemptRunner {
       return this.args.pairedExecutionLifecycle.recordFinalOutputBeforeDelivery(
         event.outputText,
         getAgentOutputAttachments(event.output),
+        event.structuredOutput?.visibility === 'public'
+          ? event.structuredOutput.arbiterDirective
+          : undefined,
+        event.structuredOutput?.visibility === 'public'
+          ? event.structuredOutput.protocolError
+          : undefined,
       );
     } catch (err) {
       this.args.log.warn(

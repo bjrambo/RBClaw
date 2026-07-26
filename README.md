@@ -70,6 +70,33 @@ paired-runtime, room별 `workDir`, reviewer 읽기 전용 검증, 개인 설정�
       → 왕복이 누적되면 arbiter 자동 요청 가능
 ```
 
+### Persistent Supervisor
+
+Tribunal phase와 장기 실행 상태를 분리합니다. `paired_tasks.id`가 Persistent
+Goal ID이며, 같은 Goal 안에서 bounded Episode만 반복합니다.
+
+- Episode owner/reviewer 왕복 기본 상한: 6
+- Goal 자동 Arbiter 호출 기본 상한: 2
+- 동일 progress fingerprint 기본 허용 횟수: 2
+- 실행 불가 상태: `waiting_retry`, `waiting_external`, `waiting_user`,
+  `parked`
+- 대기 상태에서는 LLM을 polling 용도로 호출하지 않습니다.
+- 사용자 입력은 같은 Goal을 재개하되 total round와 arbitration count를
+  보존합니다.
+- `completed`, `cancelled`, `superseded` 이후 새 요청만 새 Goal이 됩니다.
+
+`플랜 시작: 1) ... 2) ...`, `플랜 상태`, `플랜 중지` 명령은 Checklist를
+같은 Goal의 Episode 순서로 관리합니다. 마지막 item이 승인되어야 Goal이
+완료됩니다.
+
+Agent activity timeout과 별도로 `HARD_TURN_TIMEOUT`이 절대 벽시계 상한을
+제공합니다. 출력이나 tool activity는 hard timeout을 연장하지 않습니다.
+
+복구는 at-least-once 실행을 허용하되 reservation, execution lease, CAS,
+stable delivery key로 RBClaw이 소유한 상태 전이·후속 turn·watcher·Discord
+전달을 effective-once로 수렴시킵니다. 임의 shell/SSH/API 변경은 이 보장
+범위가 아니며 확인할 수 없는 crash 경계에서는 자동 재실행하지 않습니다.
+
 ### MoA
 
 MoA가 켜져 있으면 arbiter가 판정하기 전에 Kimi, GLM 같은 외부 모델 의견을 병렬 수집하고, 그 결과를 arbiter 프롬프트에 주입합니다. 최종 판정은 여전히 RBClaw arbiter가 내립니다.

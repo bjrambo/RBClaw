@@ -420,6 +420,17 @@ function RoomCurrentTurnSummary({
           · {t.rooms.round} {task.roundTripCount}
         </small>
       ) : null}
+      {task?.supervisorState ? (
+        <small>
+          · {task.supervisorState}
+          {task.episodeNumber ? ` E${task.episodeNumber}` : ''}
+          {task.totalRoundTrips !== undefined
+            ? ` T${task.totalRoundTrips}`
+            : ''}
+          {task.arbitrationCount ? ` A${task.arbitrationCount}` : ''}
+          {task.stagnationCount ? ` S${task.stagnationCount}` : ''}
+        </small>
+      ) : null}
       {lastUpdated ? (
         <small style={{ marginLeft: 'auto' }}>
           {formatDate(lastUpdated, locale)}

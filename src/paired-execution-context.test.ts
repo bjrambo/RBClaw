@@ -25,7 +25,7 @@ vi.mock('./db.js', () => {
       updatePairedTask(id, updates);
       return true;
     }),
-    hasActiveCiWatcherForChat: vi.fn(() => false),
+    hasActiveCiWatcherForGoal: vi.fn(() => false),
     releasePairedTaskExecutionLease: vi.fn(),
   };
 });
@@ -48,6 +48,11 @@ import {
 } from './paired-execution-context.js';
 import { resolveCanonicalSourceRef } from './paired-source-ref.js';
 import type { PairedTask, RegisteredGroup, RoomRoleContext } from './types.js';
+import {
+  createChecklistPlan,
+  parseChecklistPlanNotes,
+  serializeChecklistPlan,
+} from './checklist-continuation.js';
 
 const group: RegisteredGroup = {
   name: 'Paired Room',
@@ -69,6 +74,14 @@ const ownerContext: RoomRoleContext = {
 const reviewerContext: RoomRoleContext = {
   serviceId: config.REVIEWER_SERVICE_ID_FOR_TYPE,
   role: 'reviewer',
+  ownerServiceId: config.CODEX_MAIN_SERVICE_ID,
+  reviewerServiceId: config.REVIEWER_SERVICE_ID_FOR_TYPE,
+  failoverOwner: false,
+};
+
+const arbiterContext: RoomRoleContext = {
+  serviceId: config.ARBITER_SERVICE_ID ?? config.REVIEWER_SERVICE_ID_FOR_TYPE,
+  role: 'arbiter',
   ownerServiceId: config.CODEX_MAIN_SERVICE_ID,
   reviewerServiceId: config.REVIEWER_SERVICE_ID_FOR_TYPE,
   failoverOwner: false,
@@ -296,6 +309,45 @@ describe('paired execution context owner task preparation', () => {
     );
   });
 
+  it.each(['waiting_user', 'parked'] as const)(
+    'resumes the same canonical Goal from %s while preserving total counters',
+    (supervisorState) => {
+      const existing = buildPairedTask({
+        id: `task-${supervisorState}`,
+        status: 'active',
+        supervisor_state: supervisorState,
+        episode_number: 3,
+        round_trip_count: 4,
+        total_round_trip_count: 18,
+        arbitration_count: 2,
+        stagnation_count: 2,
+        last_blocker_class: 'stagnation',
+      });
+      vi.mocked(db.getPairedTaskById).mockReturnValue(undefined);
+
+      const result = resolveOwnerTaskForHumanMessage({
+        group,
+        chatJid: 'dc:test',
+        roomRoleContext: ownerContext,
+        existingTask: existing,
+      });
+
+      expect(result.task?.id).toBe(existing.id);
+      expect(db.createPairedTask).not.toHaveBeenCalled();
+      expect(db.updatePairedTask).toHaveBeenCalledWith(
+        existing.id,
+        expect.objectContaining({
+          supervisor_state: 'runnable',
+          episode_number: 4,
+          round_trip_count: 0,
+          stagnation_count: 0,
+          total_round_trip_count: 18,
+          arbitration_count: 2,
+        }),
+      );
+    },
+  );
+
   it('resets active STEP_DONE loop counters when a new human message continues an active task', () => {
     vi.mocked(db.getLatestOpenPairedTaskForChat).mockReturnValue(
       buildPairedTask({
@@ -441,6 +493,34 @@ describe('paired execution context reviewer preparation', () => {
     });
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('paired execution context arbiter preparation', () => {
+  registerPairedContextHooks();
+
+  it('increments arbitration count when an arbiter execution is claimed', () => {
+    const task = buildPairedTask({
+      status: 'arbiter_requested',
+      arbitration_count: 1,
+    });
+    vi.mocked(db.getLatestOpenPairedTaskForChat).mockReturnValue(task);
+    vi.mocked(db.getPairedTaskById).mockReturnValue(task);
+
+    preparePairedExecutionContext({
+      group,
+      chatJid: 'dc:test',
+      runId: 'run-arbiter-claim',
+      roomRoleContext: arbiterContext,
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({
+        status: 'in_arbitration',
+        arbitration_count: 2,
+      }),
+    );
   });
 });
 
@@ -606,6 +686,48 @@ describe('paired execution context owner completion handling', () => {
       'task-1',
       expect.objectContaining({ status: 'completed' }),
     );
+  });
+
+  it('advances a checklist episode without resetting Goal totals', () => {
+    const repoDir = createCanonicalRepoWithCommit('reviewed checklist step');
+    const approvedSourceRef = resolveTreeRef(repoDir);
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'merge_ready',
+        work_dir: repoDir,
+        source_ref: approvedSourceRef,
+        plan_notes: serializeChecklistPlan(
+          createChecklistPlan(['first', 'second']),
+        ),
+        episode_number: 2,
+        round_trip_count: 3,
+        total_round_trip_count: 8,
+        arbitration_count: 1,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'owner',
+      status: 'succeeded',
+      summary: 'TASK_DONE\nfirst complete',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'active',
+        episode_number: 3,
+        round_trip_count: 0,
+        total_round_trip_count: 8,
+        arbitration_count: 1,
+        supervisor_state: 'runnable',
+      }),
+    );
+    const update = vi
+      .mocked(db.updatePairedTask)
+      .mock.calls.at(-1)?.[1] as Partial<PairedTask>;
+    expect(parseChecklistPlanNotes(update.plan_notes)?.currentIndex).toBe(1);
   });
 
   it('requests review when the owner reports STEP_DONE in active mode', () => {
@@ -840,7 +962,7 @@ describe('paired execution context finalize re-review handling', () => {
         round_trip_count: 0,
       }),
     );
-    vi.mocked(db.hasActiveCiWatcherForChat).mockReturnValue(true);
+    vi.mocked(db.hasActiveCiWatcherForGoal).mockReturnValue(true);
 
     completePairedExecutionContext({
       taskId: 'task-1',

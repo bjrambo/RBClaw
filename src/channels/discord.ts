@@ -30,6 +30,7 @@ import {
 import { describeDownloadedAttachment } from './discord-attachments.js';
 import { deleteRecentDiscordMessagesByContent } from './discord-message-cleanup.js';
 import { prepareDiscordOutbound } from './discord-outbound.js';
+import { createDeliverySender } from './discord-delivery-idempotency.js';
 
 const TRANSCRIPTION_CACHE_DIR = path.join(CACHE_DIR, 'transcriptions');
 const DISCORD_OWNER_CHANNEL = 'discord';
@@ -494,11 +495,11 @@ export class DiscordChannel implements Channel {
       cleaned = replaceConfiguredMentionAlias(cleaned);
       cleaned = formatOutbound(cleaned);
 
-      // Discord has a 2000 character limit per message and 10 attachments per message
       const MAX_LENGTH = 2000;
       const MAX_ATTACHMENTS = 10;
       const sentMessageIds: string[] = [];
       let chunkCount = 0;
+      const send = createDeliverySender(textChannel, options.deliveryKey);
 
       const recordSentMessage = (message: Message | null | undefined) => {
         chunkCount += 1;
@@ -520,18 +521,16 @@ export class DiscordChannel implements Channel {
       }
 
       if (cleaned.length <= MAX_LENGTH) {
-        // Send text with first batch of files
         recordSentMessage(
-          await textChannel.send({
+          await send({
             content: cleaned || undefined,
             files: fileBatches[0]?.length ? fileBatches[0] : undefined,
             flags: MessageFlags.SuppressEmbeds,
           }),
         );
-        // Send remaining file batches as follow-up messages
         for (let b = 1; b < fileBatches.length; b++) {
           recordSentMessage(
-            await textChannel.send({
+            await send({
               files: fileBatches[b],
               flags: MessageFlags.SuppressEmbeds,
             }),
@@ -544,7 +543,7 @@ export class DiscordChannel implements Channel {
           const chunk = cleaned.slice(i, i + MAX_LENGTH);
           const batch = fileBatches[fileBatchIndex];
           recordSentMessage(
-            await textChannel.send({
+            await send({
               content: chunk,
               files: batch?.length ? batch : undefined,
               flags: MessageFlags.SuppressEmbeds,
@@ -552,10 +551,9 @@ export class DiscordChannel implements Channel {
           );
           if (batch?.length) fileBatchIndex++;
         }
-        // Send any remaining file batches
         for (let b = fileBatchIndex; b < fileBatches.length; b++) {
           recordSentMessage(
-            await textChannel.send({
+            await send({
               files: fileBatches[b],
               flags: MessageFlags.SuppressEmbeds,
             }),
@@ -595,6 +593,8 @@ export class DiscordChannel implements Channel {
   isConnected(): boolean {
     return this.client !== null && this.client.isReady();
   }
+
+  supportsIdempotentDelivery = () => true;
 
   isOwnMessage(msg: NewMessage): boolean {
     return !!msg.is_bot_message && msg.sender === this.client?.user?.id;

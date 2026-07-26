@@ -38,12 +38,32 @@ export interface RunnerOutputAttachment {
   mime?: string;
 }
 
+export type ArbiterDirectiveVerdict =
+  | 'proceed'
+  | 'revise'
+  | 'reset'
+  | 'escalate';
+
+export interface ArbiterDirectiveItem {
+  id: string;
+  scope: string;
+  action: string;
+}
+
+export interface ArbiterDirective {
+  verdict: ArbiterDirectiveVerdict;
+  requirements: ArbiterDirectiveItem[];
+  blockers: ArbiterDirectiveItem[];
+}
+
 export type RunnerStructuredOutput =
   | {
       visibility: 'public';
       text: string;
       verdict?: Exclude<RunnerOutputVerdict, 'silent'>;
       attachments?: RunnerOutputAttachment[];
+      arbiterDirective?: ArbiterDirective;
+      protocolError?: 'arbiter-verdict-mismatch';
     }
   | {
       visibility: 'silent';
@@ -473,7 +493,14 @@ function isVisibleVerdict(
 const LEADING_STRUCTURED_OUTPUT_CONTROL_RE =
   /^[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]+/u;
 const STRUCTURED_STATUS_PREFIX_RE =
-  /^(STEP_DONE|TASK_DONE|DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)[ \t]*(?:\r?\n)+([\s\S]+)$/;
+  /^(STEP_DONE|TASK_DONE|DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT|PROCEED|REVISE|RESET|ESCALATE)[ \t]*(?:\r?\n)+([\s\S]+)$/;
+
+const ARBITER_STATUS_PREFIXES = new Set([
+  'PROCEED',
+  'REVISE',
+  'RESET',
+  'ESCALATE',
+]);
 
 function stripLeadingStructuredOutputControls(value: string): string {
   return value.replace(LEADING_STRUCTURED_OUTPUT_CONTROL_RE, '').trimStart();
@@ -504,6 +531,61 @@ function normalizeAttachments(value: unknown): RunnerOutputAttachment[] {
     });
   }
   return attachments;
+}
+
+function normalizeDirectiveItems(
+  value: unknown,
+): ArbiterDirectiveItem[] | null {
+  if (!Array.isArray(value)) return null;
+  const items: ArbiterDirectiveItem[] = [];
+  for (const valueItem of value) {
+    if (
+      !valueItem ||
+      typeof valueItem !== 'object' ||
+      Array.isArray(valueItem)
+    ) {
+      return null;
+    }
+    const item = valueItem as Record<string, unknown>;
+    if (
+      typeof item.id !== 'string' ||
+      typeof item.scope !== 'string' ||
+      typeof item.action !== 'string'
+    ) {
+      return null;
+    }
+    items.push({
+      id: item.id.trim(),
+      scope: item.scope.trim(),
+      action: item.action.trim(),
+    });
+  }
+  return items;
+}
+
+function normalizeArbiterDirective(value: unknown): ArbiterDirective | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const verdict =
+    typeof candidate.verdict === 'string'
+      ? candidate.verdict.trim().toLowerCase()
+      : '';
+  if (
+    verdict !== 'proceed' &&
+    verdict !== 'revise' &&
+    verdict !== 'reset' &&
+    verdict !== 'escalate'
+  ) {
+    return null;
+  }
+  const requirements = normalizeDirectiveItems(candidate.requirements);
+  const blockers = normalizeDirectiveItems(candidate.blockers);
+  if (!requirements || !blockers) return null;
+  return {
+    verdict,
+    requirements,
+    blockers,
+  };
 }
 
 function extractStructuredJsonCandidate(trimmed: string): string {
@@ -555,6 +637,7 @@ export function normalizeRbclawStructuredOutput(
         text?: unknown;
         verdict?: unknown;
         attachments?: unknown;
+        arbiterDirective?: unknown;
       };
     };
     const envelope = parsed?.rbclaw;
@@ -585,6 +668,17 @@ export function normalizeRbclawStructuredOutput(
           return normalizePublicTextOutput(result);
         }
         const attachments = normalizeAttachments(envelope.attachments);
+        const arbiterDirective = normalizeArbiterDirective(
+          envelope.arbiterDirective,
+        );
+        const statusIsArbiter =
+          statusPrefix != null && ARBITER_STATUS_PREFIXES.has(statusPrefix);
+        const protocolError =
+          statusIsArbiter &&
+          arbiterDirective &&
+          statusPrefix?.toLowerCase() !== arbiterDirective.verdict
+            ? ('arbiter-verdict-mismatch' as const)
+            : undefined;
         const text = prefixStructuredText(envelope.text, statusPrefix);
         return {
           result: text,
@@ -595,6 +689,8 @@ export function normalizeRbclawStructuredOutput(
               ? envelope.verdict
               : undefined,
             ...(attachments.length > 0 ? { attachments } : {}),
+            ...(arbiterDirective ? { arbiterDirective } : {}),
+            ...(protocolError ? { protocolError } : {}),
           },
         };
       }

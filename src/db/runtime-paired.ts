@@ -349,6 +349,8 @@ export function insertPairedTurnOutput(
     | {
         createdAt?: string;
         attachments?: import('../types.js').OutboundAttachment[];
+        arbiterDirectiveJson?: string | null;
+        arbiterDirectiveFingerprint?: string | null;
       },
 ): void {
   const options =

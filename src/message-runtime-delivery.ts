@@ -1,12 +1,15 @@
 import {
   markWorkItemDelivered,
   markWorkItemDeliveryRetry,
+  markWorkItemDeliveryUncertain,
+  getPairedTaskById,
   type WorkItem,
 } from './db.js';
 import { logger } from './logger.js';
 import { resolveActiveRole } from './message-runtime-rules.js';
 import { getErrorMessage } from './utils.js';
 import type { Channel, PairedTask, PairedRoomRole } from './types.js';
+import { transitionPairedSupervisorState } from './paired-supervisor-state.js';
 
 type RuntimeDeliveryLog = Pick<typeof logger, 'info' | 'warn' | 'error'>;
 
@@ -109,13 +112,30 @@ export async function deliverOpenWorkItem(args: {
           {
             attachmentBaseDirs: args.attachmentBaseDirs,
             attachments,
+            ...(args.item.delivery_key
+              ? { deliveryKey: args.item.delivery_key }
+              : {}),
           },
         )
-      : await args.channel.sendMessage(
-          args.item.chat_jid,
-          args.item.result_payload,
-        );
-    markWorkItemDelivered(args.item.id, sendResult?.primaryMessageId ?? null);
+      : args.item.delivery_key
+        ? await args.channel.sendMessage(
+            args.item.chat_jid,
+            args.item.result_payload,
+            { deliveryKey: args.item.delivery_key },
+          )
+        : await args.channel.sendMessage(
+            args.item.chat_jid,
+            args.item.result_payload,
+          );
+    markWorkItemDelivered(
+      args.item.id,
+      sendResult
+        ? {
+            primaryMessageId: sendResult.primaryMessageId,
+            messageIds: sendResult.messageIds,
+          }
+        : null,
+    );
     args.openContinuation(args.item.chat_jid);
     args.log.info(
       buildDeliveryLogContext(args.channel, args.item, {
@@ -128,6 +148,35 @@ export async function deliverOpenWorkItem(args: {
     return true;
   } catch (err) {
     const errorMessage = getErrorMessage(err);
+    if (
+      args.item.delivery_key &&
+      args.channel.supportsIdempotentDelivery?.() !== true
+    ) {
+      markWorkItemDeliveryUncertain(args.item.id, errorMessage);
+      const pairedTask = args.item.paired_task_id
+        ? getPairedTaskById(args.item.paired_task_id)
+        : null;
+      if (
+        pairedTask &&
+        pairedTask.status !== 'completed' &&
+        pairedTask.supervisor_state !== 'waiting_user'
+      ) {
+        transitionPairedSupervisorState({
+          task: pairedTask,
+          nextState: 'waiting_user',
+          reason: 'delivery-result-uncertain',
+          patch: { last_blocker_class: 'external' },
+        });
+      }
+      args.log.error(
+        buildDeliveryLogContext(args.channel, args.item, {
+          deliveryMode: 'send',
+          err,
+        }),
+        'Delivery result is uncertain on a channel without idempotent retry support',
+      );
+      return false;
+    }
     markWorkItemDeliveryRetry(args.item.id, errorMessage);
     args.log.warn(
       buildDeliveryLogContext(args.channel, args.item, {

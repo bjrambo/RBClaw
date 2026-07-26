@@ -2,6 +2,7 @@ import { getErrorMessage } from './utils.js';
 
 import {
   deleteTask,
+  getPairedTaskById,
   getTaskById,
   logTaskRun,
   storeChatMetadata,
@@ -11,6 +12,8 @@ import {
 } from './db.js';
 import { resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { schedulePairedFollowUpOnce } from './paired-follow-up-scheduler.js';
+import { transitionPairedSupervisorState } from './paired-supervisor-state.js';
 import { createTaskStatusTracker } from './task-status-tracker.js';
 import { extractWatchCiTarget } from './task-watch-status.js';
 import {
@@ -33,6 +36,34 @@ function enqueueOwnerAfterTerminalCiWatcher(args: {
     return;
   }
 
+  let pairedTask = args.task.paired_task_id
+    ? getPairedTaskById(args.task.paired_task_id)
+    : undefined;
+  if (args.task.paired_task_id) {
+    if (
+      !pairedTask ||
+      pairedTask.status === 'completed' ||
+      pairedTask.supervisor_state !== 'waiting_external' ||
+      pairedTask.external_wait_ref !== args.task.external_wait_ref
+    ) {
+      return;
+    }
+    const resumed = transitionPairedSupervisorState({
+      task: pairedTask,
+      nextState: 'runnable',
+      reason: 'ci-watcher-terminal',
+      patch: {
+        external_wait_ref: null,
+        last_blocker_class: null,
+        resume_at: null,
+      },
+    });
+    if (!resumed) {
+      return;
+    }
+    pairedTask = getPairedTaskById(pairedTask.id);
+  }
+
   const timestamp = new Date().toISOString();
   const content = [
     '[CI watcher completed]',
@@ -50,10 +81,22 @@ function enqueueOwnerAfterTerminalCiWatcher(args: {
     is_bot_message: false,
     message_source_kind: 'trusted_external_bot',
   });
-  args.deps.queue.enqueueMessageCheck(
-    args.task.chat_jid,
-    resolveGroupIpcPath(args.task.group_folder),
-  );
+  const enqueue = () =>
+    args.deps.queue.enqueueMessageCheck(
+      args.task.chat_jid,
+      resolveGroupIpcPath(args.task.group_folder),
+    );
+  if (pairedTask) {
+    schedulePairedFollowUpOnce({
+      chatJid: args.task.chat_jid,
+      runId: `ci-terminal-${args.task.id}`,
+      task: pairedTask,
+      intentKind: 'owner-follow-up',
+      enqueue,
+    });
+  } else {
+    enqueue();
+  }
   logger.info(
     {
       taskId: args.task.id,
@@ -68,6 +111,18 @@ export async function runGithubCiTask(
   task: ScheduledTask,
   deps: SchedulerDependencies,
 ): Promise<void> {
+  const persistedTask = getTaskById(task.id);
+  if (
+    !persistedTask ||
+    persistedTask.status !== 'active' ||
+    persistedTask.terminal_event_applied_at
+  ) {
+    logger.info(
+      { taskId: task.id },
+      'Skipped stale or already-applied GitHub CI watcher execution',
+    );
+    return;
+  }
   const startTime = Date.now();
   const runAtIso = new Date().toISOString();
   let result: string | null = null;
@@ -107,7 +162,14 @@ export async function runGithubCiTask(
           task.room_role,
         );
       }
-      deleteTask(task.id);
+      if (task.paired_task_id) {
+        updateTask(task.id, {
+          status: 'completed',
+          terminal_event_applied_at: runAtIso,
+        });
+      } else {
+        deleteTask(task.id);
+      }
       completedAndDeleted = true;
       enqueueOwnerAfterTerminalCiWatcher({
         task,

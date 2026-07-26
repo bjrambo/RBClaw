@@ -35,6 +35,7 @@ export interface AppConfig {
     schedulerPollInterval: number;
     failoverMinDurationMs: number;
     agentTimeout: number;
+    hardTurnTimeout: number;
     agentMaxOutputSize: number;
     ipcPollInterval: number;
     idleTimeout: number;
@@ -58,6 +59,11 @@ export interface AppConfig {
     agentLanguage: string;
     arbiterDeadlockThreshold: number;
     maxRoundTrips: number;
+    maxEpisodeRoundTrips: number;
+    maxArbitrations: number;
+    stagnationThreshold: number;
+    retryBaseDelayMs: number;
+    retryMaxDelayMs: number;
   };
   models: {
     owner: RoleModelConfig;

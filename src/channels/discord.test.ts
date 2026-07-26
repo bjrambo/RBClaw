@@ -1142,6 +1142,42 @@ describe('sendMessage', () => {
   });
 });
 
+describe('delivery idempotency', () => {
+  it('uses stable distinct Discord nonces for retried delivery chunks', async () => {
+    const channel = new DiscordChannel('test-token', createTestOpts());
+    await channel.connect();
+    const firstSend = vi.fn().mockResolvedValue({ id: 'message-1' });
+    currentClient().channels.fetch.mockResolvedValue({
+      send: firstSend,
+      sendTyping: vi.fn(),
+    });
+
+    await channel.sendMessage('dc:1234567890123456', 'x'.repeat(3000), {
+      deliveryKey: 'stable-work-item-key',
+    });
+    const firstNonces = firstSend.mock.calls.map(([payload]) => payload.nonce);
+
+    const retrySend = vi.fn().mockResolvedValue({ id: 'message-1' });
+    currentClient().channels.fetch.mockResolvedValue({
+      send: retrySend,
+      sendTyping: vi.fn(),
+    });
+    await channel.sendMessage('dc:1234567890123456', 'x'.repeat(3000), {
+      deliveryKey: 'stable-work-item-key',
+    });
+
+    expect(firstNonces).toHaveLength(2);
+    expect(firstNonces[0]).not.toBe(firstNonces[1]);
+    expect(retrySend.mock.calls.map(([payload]) => payload.nonce)).toEqual(
+      firstNonces,
+    );
+    expect(
+      retrySend.mock.calls.every(([payload]) => payload.enforceNonce === true),
+    ).toBe(true);
+    expect(channel.supportsIdempotentDelivery()).toBe(true);
+  });
+});
+
 // --- ownsJid ---
 
 describe('ownsJid', () => {

@@ -1,8 +1,14 @@
 import {
   ARBITER_DEADLOCK_THRESHOLD,
-  PAIRED_MAX_ROUND_TRIPS,
+  PAIRED_MAX_ARBITRATIONS,
+  PAIRED_MAX_EPISODE_ROUND_TRIPS,
+  PAIRED_STAGNATION_THRESHOLD,
 } from './config.js';
-import { getPairedTaskById, hasActiveCiWatcherForChat } from './db.js';
+import {
+  getPairedTaskById,
+  getPairedTurnOutputs,
+  hasActiveCiWatcherForGoal,
+} from './db.js';
 import { resolveDirectWorkDir } from './direct-work-dir.js';
 import { isTerminalCodexAccountFailure } from './agent-error-detection.js';
 import { logger } from './logger.js';
@@ -12,14 +18,85 @@ import {
   transitionPairedTaskStatus,
 } from './paired-task-status.js';
 import { resolveOwnerCompletionSignal } from './paired-completion-signals.js';
-import { hasCodeChangesSinceRef } from './paired-source-ref.js';
+import {
+  hasCodeChangesSinceRef,
+  resolveCanonicalSourceRef,
+} from './paired-source-ref.js';
 import { parseVisibleVerdict } from './paired-verdict.js';
+import { buildPairedProgressFingerprint } from './paired-progress-fingerprint.js';
+import {
+  advanceChecklistPlan,
+  parseChecklistPlanNotes,
+  serializeChecklistPlan,
+} from './checklist-continuation.js';
 import type { PairedTask } from './types.js';
 
 type OwnerFinalizeOutcome = 'stop' | 're_review';
 const OWNER_FAILURE_ESCALATION_THRESHOLD = 2;
 const OWNER_CODEX_UNAVAILABLE_USER_ESCALATION_THRESHOLD = 4;
 const EMPTY_STEP_DONE_THRESHOLD = 2;
+
+interface OwnerProgressPatch {
+  progress_fingerprint: string;
+  stagnation_count: number;
+  last_blocker_class: 'stagnation' | null;
+}
+
+function ownerFinalizeArbiterMessages(
+  verdict: ReturnType<typeof parseVisibleVerdict>,
+) {
+  if (verdict === 'blocked' || verdict === 'needs_context') {
+    return {
+      request: 'Owner blocked during finalize — requesting arbiter',
+      escalate: 'Owner blocked during finalize — escalating to user',
+    };
+  }
+  if (verdict === 'done_with_concerns') {
+    return {
+      request: 'Owner finalize loop detected — requesting arbiter',
+      escalate: 'Owner finalize loop detected — escalating to user',
+    };
+  }
+  return {
+    request: 'Owner finalize DONE loop detected — requesting arbiter',
+    escalate: 'Owner finalize DONE loop detected — escalating to user',
+  };
+}
+
+function resolveOwnerProgressPatch(args: {
+  task: PairedTask;
+  summary?: string | null;
+}): OwnerProgressPatch {
+  const reviewerOutput = [...getPairedTurnOutputs(args.task.id)]
+    .reverse()
+    .find((output) => output.role === 'reviewer');
+  const currentSourceRef = resolveCanonicalSourceRef(
+    resolveDirectWorkDir(args.task.work_dir),
+  );
+  const fingerprint = buildPairedProgressFingerprint({
+    taskId: args.task.id,
+    workDir: resolveDirectWorkDir(args.task.work_dir),
+    currentSourceRef,
+    approvedSourceRef: args.task.source_ref,
+    ownerVerdict: parseVisibleVerdict(args.summary),
+    ownerOutput: args.summary ?? null,
+    reviewerVerdict: reviewerOutput?.verdict ?? null,
+    reviewerFeedback: reviewerOutput?.output_text ?? null,
+    blockerClass: args.task.last_blocker_class ?? null,
+    externalWaitRef: args.task.external_wait_ref ?? null,
+    verificationEvidence: null,
+  });
+  const stagnationCount =
+    fingerprint === args.task.progress_fingerprint
+      ? (args.task.stagnation_count ?? 0) + 1
+      : 0;
+  return {
+    progress_fingerprint: fingerprint,
+    stagnation_count: stagnationCount,
+    last_blocker_class:
+      stagnationCount >= PAIRED_STAGNATION_THRESHOLD ? 'stagnation' : null,
+  };
+}
 
 export function handleFailedOwnerExecution(args: {
   task: PairedTask;
@@ -195,6 +272,7 @@ function handleOwnerFinalizeCompletion(args: {
 }): OwnerFinalizeOutcome {
   const { task, taskId, summary, now } = args;
   const ownerVerdict = parseVisibleVerdict(summary);
+  const progressPatch = resolveOwnerProgressPatch({ task, summary });
   const hasNewChanges = hasCodeChangesSinceRef(
     resolveDirectWorkDir(task.work_dir),
     task.source_ref,
@@ -216,25 +294,14 @@ function handleOwnerFinalizeCompletion(args: {
   });
 
   if (signal.kind === 'request_arbiter') {
-    const arbiterLogMessage =
-      ownerVerdict === 'blocked' || ownerVerdict === 'needs_context'
-        ? 'Owner blocked during finalize — requesting arbiter'
-        : ownerVerdict === 'done_with_concerns'
-          ? 'Owner finalize loop detected — requesting arbiter'
-          : 'Owner finalize DONE loop detected — requesting arbiter';
-    const escalateLogMessage =
-      ownerVerdict === 'blocked' || ownerVerdict === 'needs_context'
-        ? 'Owner blocked during finalize — escalating to user'
-        : ownerVerdict === 'done_with_concerns'
-          ? 'Owner finalize loop detected — escalating to user'
-          : 'Owner finalize DONE loop detected — escalating to user';
+    const messages = ownerFinalizeArbiterMessages(ownerVerdict);
     requestArbiterOrEscalate({
       taskId,
       currentStatus: task.status,
       expectedUpdatedAt: task.updated_at,
       now,
-      arbiterLogMessage,
-      escalateLogMessage,
+      arbiterLogMessage: messages.request,
+      escalateLogMessage: messages.escalate,
       logContext: {
         taskId,
         ownerVerdict,
@@ -243,6 +310,7 @@ function handleOwnerFinalizeCompletion(args: {
         summary: summary?.slice(0, 100),
       },
       patch: {
+        ...progressPatch,
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         finalize_step_done_count: nextFinalizeStepDoneCount,
@@ -275,6 +343,7 @@ function handleOwnerFinalizeCompletion(args: {
         summary: summary?.slice(0, 100),
       },
       patch: {
+        ...progressPatch,
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         finalize_step_done_count: nextFinalizeStepDoneCount,
@@ -293,6 +362,7 @@ function handleOwnerFinalizeCompletion(args: {
         expectedUpdatedAt: task.updated_at,
         updatedAt: now,
         patch: {
+          ...progressPatch,
           owner_failure_count: 0,
           owner_step_done_streak: 0,
           finalize_step_done_count: nextFinalizeStepDoneCount,
@@ -322,6 +392,7 @@ function handleOwnerFinalizeCompletion(args: {
         ownerVerdict === 'step_done'
           ? 'Auto-triggered reviewer after owner finalize STEP_DONE'
           : 'Auto-triggered reviewer after owner finalize required re-review',
+      summary,
       patch:
         ownerVerdict === 'step_done'
           ? {
@@ -333,6 +404,19 @@ function handleOwnerFinalizeCompletion(args: {
     return 'stop';
   }
 
+  const checklistFinalization = finalizeChecklistEpisode({
+    task,
+    taskId,
+    summary,
+    now,
+    progressPatch,
+    nextFinalizeStepDoneCount,
+  });
+  if (checklistFinalization.handled) {
+    return 'stop';
+  }
+  task.plan_notes = checklistFinalization.planNotes;
+
   transitionPairedTaskStatus({
     taskId,
     currentStatus: task.status,
@@ -340,6 +424,8 @@ function handleOwnerFinalizeCompletion(args: {
     expectedUpdatedAt: task.updated_at,
     updatedAt: now,
     patch: {
+      ...progressPatch,
+      plan_notes: task.plan_notes,
       completion_reason: 'done',
       owner_failure_count: 0,
       owner_step_done_streak: 0,
@@ -354,6 +440,66 @@ function handleOwnerFinalizeCompletion(args: {
   return 'stop';
 }
 
+function finalizeChecklistEpisode(args: {
+  task: PairedTask;
+  taskId: string;
+  summary?: string | null;
+  now: string;
+  progressPatch: OwnerProgressPatch;
+  nextFinalizeStepDoneCount: number;
+}): { handled: boolean; planNotes: string | null } {
+  const plan = parseChecklistPlanNotes(args.task.plan_notes);
+  if (!plan) {
+    return { handled: false, planNotes: args.task.plan_notes };
+  }
+  const outcome = advanceChecklistPlan({
+    plan,
+    summary: args.summary ?? 'Step completed.',
+  });
+  const planNotes = serializeChecklistPlan(outcome.plan);
+  if (outcome.kind === 'completed') {
+    return { handled: false, planNotes };
+  }
+
+  const supervisorState = outcome.kind === 'continue' ? 'runnable' : 'parked';
+  transitionPairedTaskStatus({
+    taskId: args.taskId,
+    currentStatus: args.task.status,
+    nextStatus: 'active',
+    expectedUpdatedAt: args.task.updated_at,
+    updatedAt: args.now,
+    patch: {
+      ...args.progressPatch,
+      plan_notes: planNotes,
+      episode_number: (args.task.episode_number ?? 1) + 1,
+      round_trip_count: 0,
+      total_round_trip_count:
+        args.task.total_round_trip_count ?? args.task.round_trip_count,
+      arbitration_count: args.task.arbitration_count ?? 0,
+      supervisor_state: supervisorState,
+      supervisor_state_changed_at: args.now,
+      last_blocker_class: outcome.kind === 'parked' ? 'stagnation' : null,
+      completion_reason: null,
+      owner_failure_count: 0,
+      owner_step_done_streak: 0,
+      finalize_step_done_count: args.nextFinalizeStepDoneCount,
+      empty_step_done_streak: 0,
+    },
+  });
+  logger.info(
+    {
+      taskId: args.taskId,
+      checklistStep: outcome.plan.currentIndex + 1,
+      checklistItems: outcome.plan.items.length,
+      supervisorState,
+    },
+    outcome.kind === 'continue'
+      ? 'Advanced Checklist Plan to the next episode'
+      : 'Parked Checklist Plan after reaching its automatic turn limit',
+  );
+  return { handled: true, planNotes };
+}
+
 function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
   task: PairedTask;
   taskId: string;
@@ -363,17 +509,59 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
     owner_step_done_streak?: number;
     finalize_step_done_count?: number;
     empty_step_done_streak?: number;
+    progress_fingerprint?: string | null;
+    stagnation_count?: number;
+    last_blocker_class?: 'stagnation' | null;
   };
+  summary?: string | null;
 }): void {
   const { task, taskId, now, logMessage } = args;
-  if (task.round_trip_count >= PAIRED_MAX_ROUND_TRIPS) {
-    logger.info(
+  const progressPatch =
+    args.patch?.progress_fingerprint !== undefined
+      ? {}
+      : resolveOwnerProgressPatch({ task, summary: args.summary });
+  const combinedPatch = { ...progressPatch, ...args.patch };
+  const stagnationCount =
+    combinedPatch.stagnation_count ?? task.stagnation_count ?? 0;
+  if (
+    stagnationCount >= PAIRED_STAGNATION_THRESHOLD ||
+    task.round_trip_count >= PAIRED_MAX_EPISODE_ROUND_TRIPS
+  ) {
+    if ((task.arbitration_count ?? 0) < PAIRED_MAX_ARBITRATIONS) {
+      requestArbiterOrEscalate({
+        taskId,
+        currentStatus: task.status,
+        expectedUpdatedAt: task.updated_at,
+        now,
+        arbiterLogMessage:
+          'Owner progress stalled or episode limit reached — requesting arbiter',
+        escalateLogMessage:
+          'Owner progress stalled or episode limit reached — escalating to user',
+        patch: {
+          ...combinedPatch,
+          last_blocker_class: 'stagnation',
+        },
+      });
+      return;
+    }
+    applyPairedTaskPatch({
+      taskId,
+      expectedUpdatedAt: task.updated_at,
+      updatedAt: now,
+      patch: {
+        ...combinedPatch,
+        supervisor_state: 'waiting_user',
+        supervisor_state_changed_at: now,
+        last_blocker_class: 'stagnation',
+      },
+    });
+    logger.warn(
       {
         taskId,
-        roundTrips: task.round_trip_count,
-        max: PAIRED_MAX_ROUND_TRIPS,
+        arbitrationCount: task.arbitration_count ?? 0,
+        stagnationCount,
       },
-      'Round trip limit reached, skipping auto-review',
+      'Paused paired Goal after reaching the automatic arbitration limit',
     );
     return;
   }
@@ -399,13 +587,15 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
       updatedAt: now,
       patch: {
         round_trip_count: task.round_trip_count + 1,
+        total_round_trip_count:
+          (task.total_round_trip_count ?? task.round_trip_count) + 1,
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         empty_step_done_streak: 0,
-        ...args.patch,
+        ...combinedPatch,
       },
     });
-    if (hasActiveCiWatcherForChat(task.chat_jid)) {
+    if (hasActiveCiWatcherForGoal(task.chat_jid, task.id)) {
       logger.info(
         {
           taskId,
@@ -442,12 +632,14 @@ export function handleOwnerCompletion(args: {
         now,
         logMessage:
           'Auto-triggered reviewer after owner finalize required re-review',
+        summary,
       });
     }
     return;
   }
 
   const ownerVerdict = parseVisibleVerdict(summary);
+  const progressPatch = resolveOwnerProgressPatch({ task, summary });
   const hasNewChanges = hasCodeChangesSinceRef(
     resolveDirectWorkDir(task.work_dir),
     task.source_ref,
@@ -478,6 +670,7 @@ export function handleOwnerCompletion(args: {
         summary: summary?.slice(0, 100),
       },
       patch: {
+        ...progressPatch,
         owner_failure_count: 0,
         owner_step_done_streak: nextOwnerStepDoneStreak,
       },
@@ -508,6 +701,7 @@ export function handleOwnerCompletion(args: {
         summary: summary?.slice(0, 100),
       },
       patch: {
+        ...progressPatch,
         owner_failure_count: 0,
         owner_step_done_streak: nextOwnerStepDoneStreak,
         empty_step_done_streak: nextEmptyStepDoneStreak,
@@ -516,23 +710,14 @@ export function handleOwnerCompletion(args: {
     return;
   }
 
-  if (nextOwnerStepDoneStreak !== (task.owner_step_done_streak ?? 0)) {
-    applyPairedTaskPatch({
-      taskId,
-      expectedUpdatedAt: task.updated_at,
-      updatedAt: now,
-      patch: {
-        owner_step_done_streak: nextOwnerStepDoneStreak,
-        empty_step_done_streak: nextEmptyStepDoneStreak,
-      },
-    });
-  }
   maybeAutoTriggerReviewerAfterOwnerCompletion({
     task,
     taskId,
     now,
     logMessage: 'Auto-triggered reviewer after owner completion',
+    summary,
     patch: {
+      ...progressPatch,
       owner_step_done_streak: nextOwnerStepDoneStreak,
       empty_step_done_streak: nextEmptyStepDoneStreak,
     },

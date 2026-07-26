@@ -96,4 +96,59 @@ describe('runSpawnedAgentProcess', () => {
     });
     expect(onOutput).toHaveBeenCalledOnce();
   });
+
+  it('enforces hard wall-clock timeout even while activity resets idle timeout', async () => {
+    vi.useFakeTimers();
+    logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));
+    const proc = buildProcess();
+    const resultPromise = runSpawnedAgentProcess({
+      proc,
+      group,
+      input,
+      processName: 'test-agent',
+      logsDir,
+      startTime: Date.now(),
+      onOutput: vi.fn(async () => undefined),
+      activityTimeoutMs: 50,
+      hardTurnTimeoutMs: 100,
+      terminationGraceMs: 20,
+    });
+
+    for (let elapsed = 0; elapsed < 90; elapsed += 30) {
+      await vi.advanceTimersByTimeAsync(30);
+      (proc.stderr as PassThrough).write('Turn in progress\n');
+    }
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    proc.emit('close', null, 'SIGTERM');
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'error',
+      error: 'Agent hard turn timeout after 100ms',
+    });
+    vi.useRealTimers();
+  });
+
+  it('sends SIGKILL after grace when SIGTERM was sent but the process did not close', async () => {
+    vi.useFakeTimers();
+    logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));
+    const proc = buildProcess();
+    void runSpawnedAgentProcess({
+      proc,
+      group,
+      input,
+      processName: 'test-agent',
+      logsDir,
+      startTime: Date.now(),
+      activityTimeoutMs: 10,
+      hardTurnTimeoutMs: 1_000,
+      terminationGraceMs: 20,
+    });
+
+    await vi.advanceTimersByTimeAsync(30);
+    expect(proc.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+    expect(proc.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    proc.emit('close', null, 'SIGKILL');
+    vi.useRealTimers();
+  });
 });

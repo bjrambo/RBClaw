@@ -160,6 +160,23 @@ SESSION_COMMAND_ALLOWED_SENDERS=
 MAX_CONCURRENT_AGENTS=5
 ```
 
+## Persistent Supervisor
+
+```bash
+HARD_TURN_TIMEOUT=7200000
+PAIRED_MAX_EPISODE_ROUND_TRIPS=6
+PAIRED_MAX_ARBITRATIONS=2
+PAIRED_STAGNATION_THRESHOLD=2
+PAIRED_RETRY_BASE_DELAY_MS=30000
+PAIRED_RETRY_MAX_DELAY_MS=1800000
+```
+
+- `HARD_TURN_TIMEOUT`은 출력·tool activity와 무관한 turn 전체 벽시계 상한입니다.
+- `AGENT_TIMEOUT`과 `IDLE_TIMEOUT`의 기존 activity 기반 의미는 유지됩니다.
+- Episode limit은 현재 step의 왕복만 제한하고 Goal total counter는 유지합니다.
+- retry/external/user/parked 상태에서는 runnable gate가 Agent 호출을 차단합니다.
+- `PAIRED_MAX_ROUND_TRIPS`는 legacy 호환 입력이며 새 설정을 우선합니다.
+
 ## Discord 이미지 첨부 allowlist
 
 ```bash

@@ -131,6 +131,9 @@ export interface TaskIpcPayload {
   room_role?: PairedRoomRole;
   ci_provider?: 'github';
   ci_metadata?: string;
+  paired_task_id?: string;
+  external_wait_ref?: string;
+  watcher_dedup_key?: string;
   groupFolder?: string;
   chatJid?: string;
   targetJid?: string;

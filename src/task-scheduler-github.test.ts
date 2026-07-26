@@ -35,6 +35,7 @@ import {
   _initTestDatabase,
   createPairedTask,
   createTask,
+  getPairedTaskById,
   getRecentChatMessages,
   getTaskById,
 } from './db.js';
@@ -97,6 +98,8 @@ function createGithubWatcherTask(overrides: {
   roomRole?: ScheduledTask['room_role'];
   statusMessageId?: string | null;
   statusStartedAt?: string | null;
+  pairedTaskId?: string | null;
+  externalWaitRef?: string | null;
   now: string;
 }): ScheduledTask {
   const taskId = overrides.id ?? 'task-github-owner-complete';
@@ -127,6 +130,12 @@ Managed by host-driven watcher.
     status: 'active',
     status_message_id: overrides.statusMessageId,
     status_started_at: overrides.statusStartedAt,
+    paired_task_id: overrides.pairedTaskId ?? null,
+    external_wait_ref: overrides.externalWaitRef ?? null,
+    watcher_dedup_key:
+      overrides.pairedTaskId && overrides.externalWaitRef
+        ? `${overrides.pairedTaskId}:${overrides.externalWaitRef}`
+        : null,
     created_at: overrides.now,
   });
   return getTaskById(taskId)!;
@@ -268,5 +277,114 @@ describe('GitHub CI watcher scheduler', () => {
         '[CI watcher completed]\nCI 완료: GitHub Actions run 777777\n판정: 성공',
     });
     expect(getTaskById(task.id)).toBeUndefined();
+  });
+
+  it('wakes only the Goal linked to a terminal watcher in a shared chat', async () => {
+    checkGitHubActionsRunMock.mockResolvedValueOnce({
+      terminal: true,
+      resultSummary: 'success',
+      completionMessage: 'CI complete',
+    });
+    const now = '2026-02-22T00:00:00.000Z';
+    for (const id of ['goal-a', 'goal-b']) {
+      createPairedTask({
+        id,
+        chat_jid: 'shared@g.us',
+        group_folder: 'shared-group',
+        work_dir: '/tmp/rbclaw-test-work',
+        owner_service_id: 'codex-main',
+        reviewer_service_id: 'claude-review',
+        title: null,
+        source_ref: null,
+        plan_notes: null,
+        review_requested_at: null,
+        round_trip_count: 1,
+        owner_failure_count: 0,
+        owner_step_done_streak: 0,
+        finalize_step_done_count: 0,
+        task_done_then_user_reopen_count: 0,
+        empty_step_done_streak: 0,
+        status: 'active',
+        arbiter_verdict: null,
+        arbiter_requested_at: null,
+        completion_reason: null,
+        supervisor_state: 'waiting_external',
+        external_wait_ref: `github:${id}`,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    const watcher = createGithubWatcherTask({
+      now,
+      roomRole: 'owner',
+      pairedTaskId: 'goal-a',
+      externalWaitRef: 'github:goal-a',
+    });
+    const enqueueMessageCheck = vi.fn();
+
+    await runGithubCiTask(watcher, buildSchedulerDeps({ enqueueMessageCheck }));
+
+    expect(getPairedTaskById('goal-a')).toMatchObject({
+      supervisor_state: 'runnable',
+      external_wait_ref: null,
+    });
+    expect(getPairedTaskById('goal-b')).toMatchObject({
+      supervisor_state: 'waiting_external',
+      external_wait_ref: 'github:goal-b',
+    });
+    expect(enqueueMessageCheck).toHaveBeenCalledTimes(1);
+    expect(getTaskById(watcher.id)).toMatchObject({
+      status: 'completed',
+      terminal_event_applied_at: expect.any(String),
+    });
+  });
+
+  it('does not apply a linked watcher terminal event twice', async () => {
+    checkGitHubActionsRunMock.mockResolvedValue({
+      terminal: true,
+      resultSummary: 'success',
+      completionMessage: 'CI complete',
+    });
+    const now = '2026-02-22T00:00:00.000Z';
+    createPairedTask({
+      id: 'goal-once',
+      chat_jid: 'shared@g.us',
+      group_folder: 'shared-group',
+      work_dir: '/tmp/rbclaw-test-work',
+      owner_service_id: 'codex-main',
+      reviewer_service_id: 'claude-review',
+      title: null,
+      source_ref: null,
+      plan_notes: null,
+      review_requested_at: null,
+      round_trip_count: 0,
+      owner_failure_count: 0,
+      owner_step_done_streak: 0,
+      finalize_step_done_count: 0,
+      task_done_then_user_reopen_count: 0,
+      empty_step_done_streak: 0,
+      status: 'active',
+      arbiter_verdict: null,
+      arbiter_requested_at: null,
+      completion_reason: null,
+      supervisor_state: 'waiting_external',
+      external_wait_ref: 'github:once',
+      created_at: now,
+      updated_at: now,
+    });
+    const watcher = createGithubWatcherTask({
+      now,
+      roomRole: 'owner',
+      pairedTaskId: 'goal-once',
+      externalWaitRef: 'github:once',
+    });
+    const enqueueMessageCheck = vi.fn();
+    const deps = buildSchedulerDeps({ enqueueMessageCheck });
+
+    await runGithubCiTask(watcher, deps);
+    await runGithubCiTask(watcher, deps);
+
+    expect(enqueueMessageCheck).toHaveBeenCalledTimes(1);
+    expect(checkGitHubActionsRunMock).toHaveBeenCalledTimes(1);
   });
 });

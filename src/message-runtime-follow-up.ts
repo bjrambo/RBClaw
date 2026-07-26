@@ -25,9 +25,16 @@ type PairedTurnOutputContext = ReturnType<typeof getPairedTurnOutputs>[number];
 
 type PairedFollowUpTaskContext = Pick<
   PairedTask,
-  'id' | 'status' | 'round_trip_count' | 'updated_at' | 'owner_failure_count'
+  | 'id'
+  | 'status'
+  | 'round_trip_count'
+  | 'updated_at'
+  | 'owner_failure_count'
+  | 'supervisor_state'
+  | 'resume_at'
 > & {
   arbiter_verdict?: PairedTask['arbiter_verdict'];
+  plan_notes?: PairedTask['plan_notes'];
 };
 
 function resolveTaskArbiterVisibleVerdict(
@@ -167,10 +174,7 @@ export function resolvePairedFollowUpDecision(args: {
     taskStatus: args.task?.status ?? null,
   });
   const activeOwnerFollowUp =
-    args.allowActiveOwnerFollowUp === true &&
-    args.task?.status === 'active' &&
-    lastTurnOutputRole == null &&
-    lastTurnOutputVerdict == null;
+    args.allowActiveOwnerFollowUp === true && args.task?.status === 'active';
   const nextTurnAction =
     silentOwnerRetry || activeOwnerFollowUp
       ? ({ kind: 'owner-follow-up' } as const)
@@ -288,6 +292,7 @@ export function dispatchPairedFollowUpForEvent(args: {
   sawOutput?: boolean;
   fallbackLastTurnOutputRole?: PairedRoomRole | null;
   fallbackLastTurnOutputVerdict?: VisibleVerdict | null;
+  allowActiveOwnerFollowUp?: boolean;
   enqueue: () => void;
   enqueueMessageCheck?: () => void;
 }): PairedFollowUpDispatchResult {
@@ -299,6 +304,7 @@ export function dispatchPairedFollowUpForEvent(args: {
     sawOutput: args.sawOutput,
     fallbackLastTurnOutputRole: args.fallbackLastTurnOutputRole,
     fallbackLastTurnOutputVerdict: args.fallbackLastTurnOutputVerdict,
+    allowActiveOwnerFollowUp: args.allowActiveOwnerFollowUp,
   });
 
   if (
@@ -325,12 +331,13 @@ export function dispatchPairedFollowUpForEvent(args: {
       enqueue: args.enqueue,
       lastTurnOutputRole: decision.lastTurnOutputRole,
       lastTurnOutputVerdict: decision.lastTurnOutputVerdict,
-      allowActiveOwnerFollowUp: shouldRetrySilentOwnerExecution({
-        completedRole: args.completedRole,
-        executionStatus: args.executionStatus,
-        sawOutput: args.sawOutput,
-        taskStatus: args.task?.status ?? null,
-      }),
+      allowActiveOwnerFollowUp:
+        shouldRetrySilentOwnerExecution({
+          completedRole: args.completedRole,
+          executionStatus: args.executionStatus,
+          sawOutput: args.sawOutput,
+          taskStatus: args.task?.status ?? null,
+        }) || args.allowActiveOwnerFollowUp === true,
     });
 
     return {
@@ -357,6 +364,7 @@ export function enqueuePairedFollowUpAfterEvent(args: {
   sawOutput?: boolean;
   fallbackLastTurnOutputRole?: PairedRoomRole | null;
   fallbackLastTurnOutputVerdict?: VisibleVerdict | null;
+  allowActiveOwnerFollowUp?: boolean;
   enqueueMessageCheck: () => void;
 }): PairedFollowUpDispatchResult {
   return dispatchPairedFollowUpForEvent({
@@ -369,6 +377,7 @@ export function enqueuePairedFollowUpAfterEvent(args: {
     sawOutput: args.sawOutput,
     fallbackLastTurnOutputRole: args.fallbackLastTurnOutputRole,
     fallbackLastTurnOutputVerdict: args.fallbackLastTurnOutputVerdict,
+    allowActiveOwnerFollowUp: args.allowActiveOwnerFollowUp,
     enqueue: args.enqueueMessageCheck,
     enqueueMessageCheck: args.enqueueMessageCheck,
   });

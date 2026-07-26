@@ -65,6 +65,47 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
 | reviewer | 전역 `REVIEWER_AGENT_TYPE` (기본 Claude Code) | owner 결과 검토, 회귀 검증             |
 | arbiter  | 전역 `ARBITER_AGENT_TYPE` (옵션)              | owner / reviewer 교착 시 판정          |
 
+## Persistent Goal / Supervisor
+
+`paired_tasks.id`가 canonical Persistent Goal ID입니다. 기존 `status`는
+Tribunal phase를 유지하고, `supervisor_state`는 실행 가능 여부를 별도로
+관리합니다.
+
+```text
+Persistent Goal (paired_tasks.id)
+└─ Checklist Plan (plan_notes versioned JSON)
+   └─ Episode / Checklist Step
+      └─ Tribunal Round
+         ├─ Owner Turn
+         ├─ Reviewer Turn
+         └─ Arbiter Turn
+```
+
+- `round_trip_count`: 현재 Episode 왕복 수
+- `total_round_trip_count`: Goal 전체 누적 왕복 수
+- `arbitration_count`: 실제 Arbiter claim 누적 수
+- `progress_fingerprint`: Git/source/output/feedback/blocker의 결정론적 지문
+- `runnable`: 후속 turn 예약 가능
+- `waiting_retry`: `resume_at` 이후 watchdog가 한 번 재개
+- `waiting_external`: 연결된 Goal watcher terminal event만 재개
+- `waiting_user`: 새 사용자 입력으로 같은 Goal 재개
+- `parked`: 자동 실행 중지, 사용자 입력으로 명시적 재개
+
+Arbiter의 `PROCEED`, `REVISE`, `RESET`은 새 Episode를 열어 episode counter만
+초기화합니다. total counter는 Goal 종료까지 감소하지 않습니다. Arbiter
+directive는 runner structured output에서 SQLite까지 보존하며 canonical JSON
+fingerprint로 같은 지시 반복을 차단합니다.
+
+Agent turn은 activity timeout과 독립적인 hard wall-clock timeout을 가집니다.
+hard timeout은 정상 close 요청 후 grace period를 거쳐 SIGTERM/SIGKILL 정책을
+적용하고, retryable failure는 즉시 재실행하지 않고 backoff 상태로 전환합니다.
+
+GitHub watcher는 `paired_task_id + external_wait_ref`로 Goal과 연결됩니다. 같은
+chat의 다른 Goal은 terminal event로 깨어나지 않습니다. Discord work item은
+전송 전에 stable delivery key를 저장하고 Discord nonce/enforceNonce를
+chunk별로 사용합니다. native idempotency가 없는 Channel의 모호한 결과는
+자동 재전송하지 않고 `waiting_user`로 격리합니다.
+
 역할별 model / effort는 전역 env(`OWNER_*`, `REVIEWER_*`, `ARBITER_*`)로 정하고, room-level `agentConfig`는 provider별(`claudeModel`, `codexModel`) override만 제공합니다. `glm-code`는 Claude Agent SDK 호환 runner로 취급하되 전용 launcher(`RBCLAW_GLM_CODE_CLI_PATH` 또는 PATH의 `glm-code`)를 사용하므로, 기존 Claude Code reviewer와 분리해 owner/arbiter만 GLM으로 전환할 수 있습니다.
 
 ## Reviewer / Arbiter runtime

@@ -140,6 +140,8 @@ describe('message-runtime-final-delivery', () => {
       agent_type: 'claude-code',
       service_id: undefined,
       delivery_role: 'owner',
+      paired_task_id: null,
+      delivery_key_seed: 'run-owner',
       start_seq: 1,
       end_seq: 2,
       result_payload: 'owner final',

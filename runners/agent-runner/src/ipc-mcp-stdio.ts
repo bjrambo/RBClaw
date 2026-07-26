@@ -15,7 +15,6 @@ import {
   DEFAULT_WATCH_CI_CONTEXT_MODE,
   RBCLAW_ENV,
   TASK_CONTEXT_MODES,
-  normalizePairedRoomRole,
 } from 'rbclaw-runners-shared';
 import {
   buildCiWatchPrompt,
@@ -32,6 +31,10 @@ import { resolveIpcDirectories } from './ipc-paths.js';
 import { buildSendMessageIpcPayload } from './ipc-message.js';
 import { registerHostEvidenceTools } from './ipc-host-evidence-tool.js';
 import { registerRepoEvidenceTool } from './ipc-repo-evidence-tool.js';
+import {
+  resolveCurrentAgentType,
+  resolveCurrentRoomRole,
+} from './ipc-agent-context.js';
 
 const { ipcDir: IPC_DIR, hostIpcDir: HOST_IPC_DIR } = resolveIpcDirectories(
   process.env,
@@ -50,18 +53,6 @@ const agentType = process.env[RBCLAW_ENV.agentType] || 'claude-code';
 const roomRole = process.env[RBCLAW_ENV.roomRole];
 const runtimeTaskId = process.env[RBCLAW_ENV.runtimeTaskId];
 const allowGenericScheduling = agentType !== 'codex';
-
-function currentAgentType(): 'claude-code' | 'codex' | 'glm-code' {
-  return agentType === 'codex'
-    ? 'codex'
-    : agentType === 'glm-code'
-      ? 'glm-code'
-      : 'claude-code';
-}
-
-function currentRoomRole(): 'owner' | 'reviewer' | 'arbiter' | undefined {
-  return normalizePairedRoomRole(roomRole);
-}
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -233,8 +224,8 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         prompt: args.prompt,
         schedule_type: args.schedule_type,
         schedule_value: args.schedule_value,
-        agent_type: currentAgentType(),
-        room_role: currentRoomRole(),
+        agent_type: resolveCurrentAgentType(agentType),
+        room_role: resolveCurrentRoomRole(roomRole),
         context_mode: args.context_mode || DEFAULT_SCHEDULE_TASK_CONTEXT_MODE,
         targetJid,
         createdBy: groupFolder,
@@ -409,6 +400,10 @@ server.tool(
       target,
       checkInstructions,
     });
+    const pairedTaskId = process.env[RBCLAW_ENV.pairedTaskId] || undefined;
+    const externalWaitRef = isGitHubWatcher
+      ? `github:${args.ci_repo}:${args.ci_run_id}`
+      : `${args.ci_provider}:${target}`;
 
     const data = {
       type: 'schedule_task',
@@ -416,8 +411,8 @@ server.tool(
       prompt,
       schedule_type: 'interval' as const,
       schedule_value: String(pollSeconds * 1000),
-      agent_type: currentAgentType(),
-      room_role: currentRoomRole(),
+      agent_type: resolveCurrentAgentType(agentType),
+      room_role: resolveCurrentRoomRole(roomRole),
       context_mode: args.context_mode || DEFAULT_WATCH_CI_CONTEXT_MODE,
       ci_provider: args.ci_provider,
       ci_metadata: isGitHubWatcher
@@ -425,6 +420,11 @@ server.tool(
             repo: args.ci_repo,
             run_id: args.ci_run_id,
           })
+        : undefined,
+      paired_task_id: pairedTaskId,
+      external_wait_ref: pairedTaskId ? externalWaitRef : undefined,
+      watcher_dedup_key: pairedTaskId
+        ? `${pairedTaskId}:${externalWaitRef}`
         : undefined,
       targetJid,
       createdBy: groupFolder,

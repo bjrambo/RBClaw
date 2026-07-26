@@ -5,6 +5,7 @@ import path from 'path';
 import {
   AGENT_MAX_OUTPUT_SIZE,
   AGENT_TIMEOUT,
+  HARD_TURN_TIMEOUT,
   IDLE_TIMEOUT,
   LOG_LEVEL,
 } from './config.js';
@@ -23,6 +24,9 @@ interface RunSpawnedAgentProcessArgs {
   startTime: number;
   onOutput?: (output: AgentOutput) => Promise<void>;
   onTerminalStreamedOutputFlushed?: (output: AgentOutput) => void;
+  activityTimeoutMs?: number;
+  hardTurnTimeoutMs?: number;
+  terminationGraceMs?: number;
 }
 
 interface AgentProcessStreamState {
@@ -34,6 +38,8 @@ interface AgentProcessStreamState {
   newSessionId: string | undefined;
   outputChain: Promise<void>;
   timedOut: boolean;
+  timeoutKind: 'activity' | 'hard' | null;
+  timeoutLimitMs: number | null;
   hadStreamingOutput: boolean;
 }
 
@@ -282,6 +288,18 @@ function resolveTimedOutClose(ctx: ProcessCloseContext): void {
     signal: ctx.signal,
     hadStreamingOutput: state.hadStreamingOutput,
   });
+
+  if (state.timeoutKind === 'hard') {
+    state.outputChain.then(() => {
+      resolve({
+        status: 'error',
+        result: null,
+        error: `Agent hard turn timeout after ${state.timeoutLimitMs ?? ctx.configTimeout}ms`,
+        newSessionId: state.newSessionId,
+      });
+    });
+    return;
+  }
 
   if (state.hadStreamingOutput) {
     logger.info(
@@ -539,14 +557,24 @@ export function runSpawnedAgentProcess(
       newSessionId: undefined,
       outputChain: Promise.resolve(),
       timedOut: false,
+      timeoutKind: null,
+      timeoutLimitMs: null,
       hadStreamingOutput: false,
     };
 
     const configTimeout = group.agentConfig?.timeout || AGENT_TIMEOUT;
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+    const timeoutMs =
+      args.activityTimeoutMs ?? Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+    const hardTurnTimeoutMs = args.hardTurnTimeoutMs ?? HARD_TURN_TIMEOUT;
+    const terminationGraceMs = args.terminationGraceMs ?? 15_000;
+    let closed = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const killOnTimeout = () => {
+    const killOnTimeout = (kind: 'activity' | 'hard') => {
+      if (closed || state.timedOut) return;
       state.timedOut = true;
+      state.timeoutKind = kind;
+      state.timeoutLimitMs = kind === 'hard' ? hardTurnTimeoutMs : timeoutMs;
       logger.error(
         {
           group: group.name,
@@ -554,19 +582,26 @@ export function runSpawnedAgentProcess(
           runId: input.runId,
           processName,
         },
-        'Agent timeout, sending SIGTERM',
+        kind === 'hard'
+          ? 'Agent hard turn timeout, sending SIGTERM'
+          : 'Agent activity timeout, sending SIGTERM',
       );
       proc.kill('SIGTERM');
-      setTimeout(() => {
-        if (!proc.killed) proc.kill('SIGKILL');
-      }, 15000);
+      killTimer = setTimeout(() => {
+        if (!closed) proc.kill('SIGKILL');
+      }, terminationGraceMs);
     };
 
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
+    let timeout = setTimeout(() => killOnTimeout('activity'), timeoutMs);
+    const hardTimeout = setTimeout(
+      () => killOnTimeout('hard'),
+      hardTurnTimeoutMs,
+    );
 
     const resetTimeout = () => {
+      if (state.timedOut || closed) return;
       clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
+      timeout = setTimeout(() => killOnTimeout('activity'), timeoutMs);
     };
 
     stdoutStream.on('data', (data) => {
@@ -600,7 +635,10 @@ export function runSpawnedAgentProcess(
     });
 
     proc.on('close', (code, signal) => {
+      closed = true;
       clearTimeout(timeout);
+      clearTimeout(hardTimeout);
+      if (killTimer) clearTimeout(killTimer);
       handleProcessClose({
         args,
         state,
@@ -613,7 +651,10 @@ export function runSpawnedAgentProcess(
     });
 
     proc.on('error', (err) => {
+      closed = true;
       clearTimeout(timeout);
+      clearTimeout(hardTimeout);
+      if (killTimer) clearTimeout(killTimer);
       logger.error(
         {
           group: group.name,

@@ -45,6 +45,7 @@ function getExpectedSchemaMigrations(): Array<{
     { version: 18, name: 'paired_turn_output_attachments' },
     { version: 19, name: 'message_metadata' },
     { version: 20, name: 'direct_room_workdir' },
+    { version: 21, name: 'persistent_supervisor' },
   ];
 }
 

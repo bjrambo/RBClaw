@@ -1,4 +1,4 @@
-import { getPairedTurnOutputs } from './db.js';
+import { getPairedTaskById, getPairedTurnOutputs } from './db.js';
 import { logger } from './logger.js';
 import {
   buildArbiterPromptForTask,
@@ -26,6 +26,12 @@ import {
 } from './message-runtime-rules.js';
 import { getTaskContextMessages } from './message-runtime-task-context.js';
 import { claimPairedTurnExecution } from './paired-follow-up-scheduler.js';
+import { applyPairedTaskPatch } from './paired-task-status.js';
+import {
+  buildChecklistContinuationPrompt,
+  parseChecklistCommand,
+  serializeChecklistPlan,
+} from './checklist-continuation.js';
 import type {
   ExecuteTurnFn,
   RoleToChannelMap,
@@ -117,7 +123,7 @@ function buildQueuedGroupTurnPrompt(args: {
   }
 
   if (args.currentTask) {
-    return buildPairedTurnPrompt({
+    const basePrompt = buildPairedTurnPrompt({
       taskId: args.currentTask.id,
       chatJid: args.chatJid,
       timezone: args.timezone,
@@ -128,6 +134,10 @@ function buildQueuedGroupTurnPrompt(args: {
       ),
       turnOutputs: args.turnOutputs,
     });
+    const checklistPrompt = buildChecklistContinuationPrompt(
+      args.currentTask.plan_notes,
+    );
+    return checklistPrompt ? `${checklistPrompt}\n\n${basePrompt}` : basePrompt;
   }
 
   return args.formatMessages(
@@ -301,6 +311,43 @@ function resolveQueuedGroupTurnPlan(args: {
       existingTask: currentTask ?? null,
     });
     currentTask = resolvedTask.task;
+    const latestHumanText = [...missedMessages]
+      .reverse()
+      .find((message) => isExternalHumanMessage(message))?.content;
+    const checklistCommand = latestHumanText
+      ? parseChecklistCommand(latestHumanText)
+      : null;
+    if (
+      currentTask &&
+      (checklistCommand?.kind === 'start' || checklistCommand?.kind === 'stop')
+    ) {
+      const now = new Date().toISOString();
+      applyPairedTaskPatch({
+        taskId: currentTask.id,
+        expectedUpdatedAt: currentTask.updated_at,
+        updatedAt: now,
+        patch: {
+          plan_notes:
+            checklistCommand.kind === 'start'
+              ? serializeChecklistPlan(checklistCommand.plan)
+              : null,
+          supervisor_state: 'runnable',
+          supervisor_state_changed_at: now,
+          last_blocker_class: null,
+        },
+      });
+      currentTask = getPairedTaskById(currentTask.id) ?? {
+        ...currentTask,
+        plan_notes:
+          checklistCommand.kind === 'start'
+            ? serializeChecklistPlan(checklistCommand.plan)
+            : null,
+        supervisor_state: 'runnable',
+        supervisor_state_changed_at: now,
+        last_blocker_class: null,
+        updated_at: now,
+      };
+    }
     if (resolvedTask.supersededTask) {
       fallbackMessages = currentTask
         ? getTaskContextMessages(chatJid, currentTask).filter(

@@ -363,6 +363,59 @@ describe('shared agent output normalization', () => {
 });
 
 describe('shared agent protocol fallback behavior', () => {
+  it('preserves a structured Arbiter directive with an Arbiter status prefix', () => {
+    const normalized = normalizeRbclawStructuredOutput(`REVISE
+{
+  "rbclaw": {
+    "visibility": "public",
+    "text": "Owner must update the null guard.",
+    "arbiterDirective": {
+      "verdict": "revise",
+      "requirements": [
+        {"id":"null-check","scope":"src/example.ts","action":"handle-null-input"}
+      ],
+      "blockers": []
+    }
+  }
+}`);
+
+    expect(normalized.output).toMatchObject({
+      visibility: 'public',
+      text: 'REVISE\n\nOwner must update the null guard.',
+      arbiterDirective: {
+        verdict: 'revise',
+        requirements: [
+          {
+            id: 'null-check',
+            scope: 'src/example.ts',
+            action: 'handle-null-input',
+          },
+        ],
+        blockers: [],
+      },
+    });
+  });
+
+  it('marks mismatched visible and structured Arbiter verdicts as protocol errors', () => {
+    const normalized = normalizeRbclawStructuredOutput(`PROCEED
+{
+  "rbclaw": {
+    "visibility": "public",
+    "text": "Conflicting verdict.",
+    "arbiterDirective": {
+      "verdict": "revise",
+      "requirements": [],
+      "blockers": []
+    }
+  }
+}`);
+
+    expect(normalized.output).toMatchObject({
+      visibility: 'public',
+      protocolError: 'arbiter-verdict-mismatch',
+    });
+  });
+
   it('parses in_progress public envelopes instead of leaking raw structured JSON', () => {
     const raw = JSON.stringify({
       rbclaw: {

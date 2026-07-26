@@ -200,7 +200,8 @@ export function resolveNextTurnAction(args: {
         : { kind: 'reviewer-turn' };
     case 'arbiter_requested':
     case 'in_arbitration':
-      return args.lastTurnOutputRole === 'arbiter'
+      return args.lastTurnOutputRole === 'arbiter' &&
+        (args.ownerFailureCount ?? 0) <= 0
         ? { kind: 'none' }
         : { kind: 'arbiter-turn' };
     case 'merge_ready':

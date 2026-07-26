@@ -165,6 +165,35 @@ function buildPathsConfig(
   };
 }
 
+function buildPairedSupervisorConfig(
+  rawMaxRoundTrips: string | undefined,
+  maxRoundTrips: number,
+) {
+  return {
+    maxEpisodeRoundTrips: readIntegerAtLeast(
+      'PAIRED_MAX_EPISODE_ROUND_TRIPS',
+      rawMaxRoundTrips == null ? 6 : maxRoundTrips,
+      1,
+    ),
+    maxArbitrations: readIntegerAtLeast('PAIRED_MAX_ARBITRATIONS', 2, 1),
+    stagnationThreshold: readIntegerAtLeast(
+      'PAIRED_STAGNATION_THRESHOLD',
+      2,
+      1,
+    ),
+    retryBaseDelayMs: readIntegerAtLeast(
+      'PAIRED_RETRY_BASE_DELAY_MS',
+      30_000,
+      1_000,
+    ),
+    retryMaxDelayMs: readIntegerAtLeast(
+      'PAIRED_RETRY_MAX_DELAY_MS',
+      30 * 60 * 1000,
+      1_000,
+    ),
+  };
+}
+
 export function loadConfig(): AppConfig {
   assertNoLegacyEnvAliasesConfigured();
 
@@ -212,6 +241,11 @@ export function loadConfig(): AppConfig {
       schedulerPollInterval: 60000,
       failoverMinDurationMs: 3 * 60 * 60 * 1000,
       agentTimeout: readInteger('AGENT_TIMEOUT', 1_800_000),
+      hardTurnTimeout: readIntegerAtLeast(
+        'HARD_TURN_TIMEOUT',
+        2 * 60 * 60 * 1000,
+        1_000,
+      ),
       agentMaxOutputSize: readInteger('AGENT_MAX_OUTPUT_SIZE', 10_485_760),
       ipcPollInterval: 1000,
       idleTimeout: readInteger('IDLE_TIMEOUT', 1_800_000),
@@ -248,6 +282,7 @@ export function loadConfig(): AppConfig {
       agentLanguage: readText('AGENT_LANGUAGE') ?? '',
       arbiterDeadlockThreshold: readInteger('ARBITER_DEADLOCK_THRESHOLD', 2),
       maxRoundTrips,
+      ...buildPairedSupervisorConfig(rawMaxRoundTrips, maxRoundTrips),
     },
     models: {
       owner: buildRoleModelConfig('OWNER'),

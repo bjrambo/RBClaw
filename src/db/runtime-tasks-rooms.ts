@@ -82,6 +82,7 @@ import {
   getTaskByIdFromDatabase,
   getTasksForGroupFromDatabase,
   hasActiveCiWatcherForChatInDatabase,
+  hasActiveCiWatcherForGoalInDatabase,
   logTaskRunInDatabase,
   updateTaskAfterRunInDatabase,
   updateTaskInDatabase,
@@ -117,12 +118,16 @@ export function findDuplicateCiWatcher(
   chatJid: string,
   ciProvider: string,
   ciMetadata: string,
+  pairedTaskId?: string | null,
+  externalWaitRef?: string | null,
 ): ScheduledTask | undefined {
   return findDuplicateCiWatcherInDatabase(
     requireDatabase(),
     chatJid,
     ciProvider,
     ciMetadata,
+    pairedTaskId,
+    externalWaitRef,
   );
 }
 
@@ -207,6 +212,17 @@ export function deleteTask(id: string): void {
 
 export function hasActiveCiWatcherForChat(chatJid: string): boolean {
   return hasActiveCiWatcherForChatInDatabase(requireDatabase(), chatJid);
+}
+
+export function hasActiveCiWatcherForGoal(
+  chatJid: string,
+  pairedTaskId: string,
+): boolean {
+  return hasActiveCiWatcherForGoalInDatabase(
+    requireDatabase(),
+    chatJid,
+    pairedTaskId,
+  );
 }
 
 export function getDueTasks(): ScheduledTask[] {

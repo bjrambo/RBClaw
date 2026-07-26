@@ -275,6 +275,15 @@ describe('web dashboard room activity data', () => {
       chat_jid: 'dc:ops',
       status: 'in_review',
       round_trip_count: 3,
+      episode_number: 4,
+      total_round_trip_count: 12,
+      arbitration_count: 2,
+      stagnation_count: 1,
+      supervisor_state: 'waiting_retry',
+      last_blocker_class: 'timeout',
+      resume_at: '2026-04-26T05:35:00.000Z',
+      progress_fingerprint: '1234567890abcdef',
+      supervisor_state_changed_at: '2026-04-26T05:31:00.000Z',
       updated_at: '2026-04-26T05:30:00.000Z',
     });
     const turn: PairedTurnRecord = {
@@ -360,6 +369,15 @@ describe('web dashboard room activity data', () => {
     expect(activity.pairedTask).toMatchObject({
       id: 'paired-room-1',
       roundTripCount: 3,
+      supervisorState: 'waiting_retry',
+      episodeNumber: 4,
+      episodeRoundTrips: 3,
+      totalRoundTrips: 12,
+      arbitrationCount: 2,
+      stagnationCount: 1,
+      lastBlockerClass: 'timeout',
+      resumeAt: '2026-04-26T05:35:00.000Z',
+      progressFingerprintPrefix: '1234567890ab',
       currentTurn: {
         role: 'reviewer',
         state: 'running',

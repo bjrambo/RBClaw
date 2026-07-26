@@ -49,6 +49,7 @@ export const DATA_DIR = CONFIG.paths.dataDir;
 export const CACHE_DIR = CONFIG.paths.cacheDir;
 
 export const AGENT_TIMEOUT = CONFIG.runtime.agentTimeout;
+export const HARD_TURN_TIMEOUT = CONFIG.runtime.hardTurnTimeout;
 export const AGENT_MAX_OUTPUT_SIZE = CONFIG.runtime.agentMaxOutputSize;
 export const IPC_POLL_INTERVAL = CONFIG.runtime.ipcPollInterval;
 export const IDLE_TIMEOUT = CONFIG.runtime.idleTimeout;
@@ -127,6 +128,12 @@ export function getMoaConfig(): MoaConfig {
 }
 
 export const PAIRED_MAX_ROUND_TRIPS = CONFIG.paired.maxRoundTrips;
+export const PAIRED_MAX_EPISODE_ROUND_TRIPS =
+  CONFIG.paired.maxEpisodeRoundTrips;
+export const PAIRED_MAX_ARBITRATIONS = CONFIG.paired.maxArbitrations;
+export const PAIRED_STAGNATION_THRESHOLD = CONFIG.paired.stagnationThreshold;
+export const PAIRED_RETRY_BASE_DELAY_MS = CONFIG.paired.retryBaseDelayMs;
+export const PAIRED_RETRY_MAX_DELAY_MS = CONFIG.paired.retryMaxDelayMs;
 
 export const RECOVERY_STAGGER_MS = CONFIG.runtime.recoveryStaggerMs;
 export const RECOVERY_DURATION_MS = CONFIG.runtime.recoveryDurationMs;

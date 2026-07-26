@@ -1,7 +1,11 @@
 import { isArbiterEnabled } from './config.js';
 import { logger } from './logger.js';
 import { transitionPairedTaskStatus } from './paired-task-status.js';
-import type { PairedTaskStatus } from './types.js';
+import type {
+  PairedBlockerClass,
+  PairedSupervisorState,
+  PairedTaskStatus,
+} from './types.js';
 
 export function requestArbiterOrEscalate(args: {
   taskId: string;
@@ -25,6 +29,12 @@ export function requestArbiterOrEscalate(args: {
     arbiter_verdict?: string | null;
     arbiter_requested_at?: string | null;
     completion_reason?: string | null;
+    progress_fingerprint?: string | null;
+    stagnation_count?: number;
+    last_blocker_class?: PairedBlockerClass | null;
+    supervisor_state?: PairedSupervisorState;
+    supervisor_state_changed_at?: string | null;
+    resume_at?: string | null;
   };
 }): boolean {
   const {

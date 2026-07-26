@@ -12,6 +12,7 @@ vi.mock('./config.js', () => ({
   AGENT_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/rbclaw-test-data',
   GROUPS_DIR: '/tmp/rbclaw-test-groups',
+  HARD_TURN_TIMEOUT: 7200000, // 2h
   IDLE_TIMEOUT: 1800000, // 30min
   LOG_LEVEL: 'info',
   SERVICE_ID: 'claude',

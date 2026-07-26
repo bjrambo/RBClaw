@@ -29,6 +29,19 @@ export type PairedTaskUpdates = Partial<
     | 'plan_notes'
     | 'review_requested_at'
     | 'round_trip_count'
+    | 'episode_number'
+    | 'total_round_trip_count'
+    | 'arbitration_count'
+    | 'stagnation_count'
+    | 'progress_fingerprint'
+    | 'last_blocker_class'
+    | 'resume_at'
+    | 'supervisor_state'
+    | 'supervisor_state_changed_at'
+    | 'last_arbiter_directive_fingerprint'
+    | 'last_arbiter_directive_json'
+    | 'retry_count'
+    | 'external_wait_ref'
     | 'owner_failure_count'
     | 'owner_step_done_streak'
     | 'finalize_step_done_count'
@@ -63,6 +76,25 @@ function hydratePairedTaskRow(
 
   return {
     ...row,
+    episode_number: row.episode_number ?? 1,
+    total_round_trip_count:
+      row.total_round_trip_count ?? row.round_trip_count ?? 0,
+    arbitration_count: row.arbitration_count ?? 0,
+    stagnation_count: row.stagnation_count ?? 0,
+    progress_fingerprint: row.progress_fingerprint ?? null,
+    last_blocker_class: row.last_blocker_class ?? null,
+    resume_at: row.resume_at ?? null,
+    supervisor_state:
+      row.status === 'completed'
+        ? 'terminal'
+        : (row.supervisor_state ?? 'runnable'),
+    supervisor_state_changed_at:
+      row.supervisor_state_changed_at ?? row.updated_at,
+    last_arbiter_directive_fingerprint:
+      row.last_arbiter_directive_fingerprint ?? null,
+    last_arbiter_directive_json: row.last_arbiter_directive_json ?? null,
+    retry_count: row.retry_count ?? 0,
+    external_wait_ref: row.external_wait_ref ?? null,
     owner_service_id: ownerServiceId,
     reviewer_service_id: reviewerServiceId,
     owner_agent_type: ownerAgentType,
@@ -108,6 +140,19 @@ export function createPairedTaskInDatabase(
           plan_notes,
           review_requested_at,
           round_trip_count,
+          episode_number,
+          total_round_trip_count,
+          arbitration_count,
+          stagnation_count,
+          progress_fingerprint,
+          last_blocker_class,
+          resume_at,
+          supervisor_state,
+          supervisor_state_changed_at,
+          last_arbiter_directive_fingerprint,
+          last_arbiter_directive_json,
+          retry_count,
+          external_wait_ref,
           owner_failure_count,
           owner_step_done_streak,
           finalize_step_done_count,
@@ -120,7 +165,7 @@ export function createPairedTaskInDatabase(
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
@@ -138,6 +183,21 @@ export function createPairedTaskInDatabase(
       task.plan_notes,
       task.review_requested_at,
       task.round_trip_count,
+      task.episode_number ?? 1,
+      task.total_round_trip_count ?? task.round_trip_count,
+      task.arbitration_count ?? 0,
+      task.stagnation_count ?? 0,
+      task.progress_fingerprint ?? null,
+      task.last_blocker_class ?? null,
+      task.resume_at ?? null,
+      task.status === 'completed'
+        ? 'terminal'
+        : (task.supervisor_state ?? 'runnable'),
+      task.supervisor_state_changed_at ?? task.updated_at,
+      task.last_arbiter_directive_fingerprint ?? null,
+      task.last_arbiter_directive_json ?? null,
+      task.retry_count ?? 0,
+      task.external_wait_ref ?? null,
       task.owner_failure_count ?? 0,
       task.owner_step_done_streak ?? 0,
       task.finalize_step_done_count ?? 0,
@@ -269,6 +329,58 @@ export function updatePairedTaskInDatabase(
     fields.push('round_trip_count = ?');
     values.push(updates.round_trip_count);
   }
+  if (updates.episode_number !== undefined) {
+    fields.push('episode_number = ?');
+    values.push(updates.episode_number);
+  }
+  if (updates.total_round_trip_count !== undefined) {
+    fields.push('total_round_trip_count = ?');
+    values.push(updates.total_round_trip_count);
+  }
+  if (updates.arbitration_count !== undefined) {
+    fields.push('arbitration_count = ?');
+    values.push(updates.arbitration_count);
+  }
+  if (updates.stagnation_count !== undefined) {
+    fields.push('stagnation_count = ?');
+    values.push(updates.stagnation_count);
+  }
+  if (updates.progress_fingerprint !== undefined) {
+    fields.push('progress_fingerprint = ?');
+    values.push(updates.progress_fingerprint);
+  }
+  if (updates.last_blocker_class !== undefined) {
+    fields.push('last_blocker_class = ?');
+    values.push(updates.last_blocker_class);
+  }
+  if (updates.resume_at !== undefined) {
+    fields.push('resume_at = ?');
+    values.push(updates.resume_at);
+  }
+  if (updates.supervisor_state !== undefined) {
+    fields.push('supervisor_state = ?');
+    values.push(updates.supervisor_state);
+  }
+  if (updates.supervisor_state_changed_at !== undefined) {
+    fields.push('supervisor_state_changed_at = ?');
+    values.push(updates.supervisor_state_changed_at);
+  }
+  if (updates.last_arbiter_directive_fingerprint !== undefined) {
+    fields.push('last_arbiter_directive_fingerprint = ?');
+    values.push(updates.last_arbiter_directive_fingerprint);
+  }
+  if (updates.last_arbiter_directive_json !== undefined) {
+    fields.push('last_arbiter_directive_json = ?');
+    values.push(updates.last_arbiter_directive_json);
+  }
+  if (updates.retry_count !== undefined) {
+    fields.push('retry_count = ?');
+    values.push(updates.retry_count);
+  }
+  if (updates.external_wait_ref !== undefined) {
+    fields.push('external_wait_ref = ?');
+    values.push(updates.external_wait_ref);
+  }
   if (updates.owner_failure_count !== undefined) {
     fields.push('owner_failure_count = ?');
     values.push(updates.owner_failure_count);
@@ -347,6 +459,58 @@ export function updatePairedTaskIfUnchangedInDatabase(
   if (updates.round_trip_count !== undefined) {
     fields.push('round_trip_count = ?');
     values.push(updates.round_trip_count);
+  }
+  if (updates.episode_number !== undefined) {
+    fields.push('episode_number = ?');
+    values.push(updates.episode_number);
+  }
+  if (updates.total_round_trip_count !== undefined) {
+    fields.push('total_round_trip_count = ?');
+    values.push(updates.total_round_trip_count);
+  }
+  if (updates.arbitration_count !== undefined) {
+    fields.push('arbitration_count = ?');
+    values.push(updates.arbitration_count);
+  }
+  if (updates.stagnation_count !== undefined) {
+    fields.push('stagnation_count = ?');
+    values.push(updates.stagnation_count);
+  }
+  if (updates.progress_fingerprint !== undefined) {
+    fields.push('progress_fingerprint = ?');
+    values.push(updates.progress_fingerprint);
+  }
+  if (updates.last_blocker_class !== undefined) {
+    fields.push('last_blocker_class = ?');
+    values.push(updates.last_blocker_class);
+  }
+  if (updates.resume_at !== undefined) {
+    fields.push('resume_at = ?');
+    values.push(updates.resume_at);
+  }
+  if (updates.supervisor_state !== undefined) {
+    fields.push('supervisor_state = ?');
+    values.push(updates.supervisor_state);
+  }
+  if (updates.supervisor_state_changed_at !== undefined) {
+    fields.push('supervisor_state_changed_at = ?');
+    values.push(updates.supervisor_state_changed_at);
+  }
+  if (updates.last_arbiter_directive_fingerprint !== undefined) {
+    fields.push('last_arbiter_directive_fingerprint = ?');
+    values.push(updates.last_arbiter_directive_fingerprint);
+  }
+  if (updates.last_arbiter_directive_json !== undefined) {
+    fields.push('last_arbiter_directive_json = ?');
+    values.push(updates.last_arbiter_directive_json);
+  }
+  if (updates.retry_count !== undefined) {
+    fields.push('retry_count = ?');
+    values.push(updates.retry_count);
+  }
+  if (updates.external_wait_ref !== undefined) {
+    fields.push('external_wait_ref = ?');
+    values.push(updates.external_wait_ref);
   }
   if (updates.owner_failure_count !== undefined) {
     fields.push('owner_failure_count = ?');

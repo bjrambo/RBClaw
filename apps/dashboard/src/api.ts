@@ -118,42 +118,7 @@ export interface DashboardRoomActivity {
     sourceKind: string;
     metadata: string | null;
   }>;
-  pairedTask: {
-    id: string;
-    title: string | null;
-    status: string;
-    roundTripCount: number;
-    updatedAt: string;
-    currentTurn: {
-      turnId: string;
-      role: string;
-      intentKind: string;
-      state: string;
-      attemptNo: number;
-      executorServiceId: string | null;
-      executorAgentType: string | null;
-      activeRunId: string | null;
-      createdAt: string;
-      updatedAt: string;
-      completedAt: string | null;
-      lastError: string | null;
-      progressText: string | null;
-      progressUpdatedAt: string | null;
-    } | null;
-    outputs: Array<{
-      id: number;
-      turnNumber: number;
-      role: string;
-      verdict: string | null;
-      createdAt: string;
-      outputText: string;
-      attachments?: Array<{
-        path: string;
-        name?: string;
-        mime?: string;
-      }>;
-    }>;
-  } | null;
+  pairedTask: DashboardPairedTask | null;
 }
 
 export interface DashboardTask {
@@ -901,3 +866,4 @@ export async function addClaudeAccount(
 ): Promise<{ ok: true; index: number; accountId: string | null }> {
   return postJson('/api/settings/accounts/claude', { token });
 }
+import type { DashboardPairedTask } from './api-paired-task';

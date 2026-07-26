@@ -11,6 +11,7 @@ import {
   createProducedWorkItem,
   getOpenWorkItem,
   getOpenWorkItemForChat,
+  getRecentDeliveredWorkItemsForChat,
   markWorkItemDelivered,
   markWorkItemDeliveryRetry,
 } from './db.js';
@@ -39,6 +40,7 @@ describe('work items', () => {
     });
 
     expect(item.delivery_role).toBe('reviewer');
+    expect(item.delivery_key).toMatch(/^[a-f0-9]{64}$/);
     expect(getOpenWorkItem('dc:123', 'claude-code', item.service_id)?.id).toBe(
       item.id,
     );
@@ -53,6 +55,30 @@ describe('work items', () => {
     expect(
       getOpenWorkItem('dc:123', 'claude-code', item.service_id),
     ).toBeUndefined();
+  });
+
+  it('persists all provider message receipts for chunked delivery', () => {
+    const item = createProducedWorkItem({
+      group_folder: 'discord_test',
+      chat_jid: 'dc:receipts',
+      agent_type: 'codex',
+      delivery_role: 'owner',
+      start_seq: 1,
+      end_seq: 2,
+      result_payload: 'chunked',
+    });
+    markWorkItemDelivered(item.id, {
+      primaryMessageId: 'message-1',
+      messageIds: ['message-1', 'message-2'],
+    });
+
+    expect(getRecentDeliveredWorkItemsForChat('dc:receipts')).toContainEqual(
+      expect.objectContaining({
+        id: item.id,
+        delivery_message_id: 'message-1',
+        delivery_receipts: '["message-1","message-2"]',
+      }),
+    );
   });
 
   it('stores produced work item attachments for delivery retries', () => {

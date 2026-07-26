@@ -73,4 +73,36 @@ describe('paired turn output attachments', () => {
       database.close();
     }
   });
+
+  it('round-trips canonical Arbiter directives through SQLite', () => {
+    const database = new Database(':memory:');
+    try {
+      applyBaseSchema(database);
+      insertPairedTurnOutputInDatabase(
+        database,
+        'paired-task-arbiter-directive',
+        1,
+        'arbiter',
+        'REVISE\nOwner must fix the null guard.',
+        {
+          arbiterDirectiveJson:
+            '{"blockers":[],"requirements":[{"action":"handle-null-input","id":"null-check","scope":"src/example.ts"}],"verdict":"revise"}',
+          arbiterDirectiveFingerprint: 'abc123',
+        },
+      );
+
+      expect(
+        getPairedTurnOutputsFromDatabase(
+          database,
+          'paired-task-arbiter-directive',
+        )[0],
+      ).toMatchObject({
+        arbiter_directive_json:
+          '{"blockers":[],"requirements":[{"action":"handle-null-input","id":"null-check","scope":"src/example.ts"}],"verdict":"revise"}',
+        arbiter_directive_fingerprint: 'abc123',
+      });
+    } finally {
+      database.close();
+    }
+  });
 });

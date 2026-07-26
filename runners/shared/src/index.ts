@@ -68,6 +68,9 @@ export {
   type RunnerOutputVerdict,
   type RunnerOutputVisibility,
   type RunnerStructuredOutput,
+  type ArbiterDirective,
+  type ArbiterDirectiveItem,
+  type ArbiterDirectiveVerdict,
 } from './agent-protocol.js';
 export {
   assertReadonlyWorkspaceRepoConnectivity,

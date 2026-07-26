@@ -35,5 +35,9 @@ export function buildArbiterContextPrompt(args: {
     `</conversation-history>`,
     ``,
     `Review the conversation above and render your verdict.`,
+    `The first visible line must be exactly one of PROCEED, REVISE, RESET, or ESCALATE.`,
+    `Also include one fenced JSON object with visibility="public", the same text, and an arbiterDirective object.`,
+    `arbiterDirective must contain the matching lowercase verdict plus requirements and blockers arrays of stable {id, scope, action} objects.`,
+    `Do not put timestamps, run IDs, session IDs, or display-only prose in arbiterDirective.`,
   ].join('\n');
 }

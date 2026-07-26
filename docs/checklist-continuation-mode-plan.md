@@ -1,5 +1,11 @@
 # Checklist Continuation Mode Plan
 
+> 구현 상태: Persistent Supervisor와 통합 완료. 이 문서 아래의 단계 전략은
+> 최초 설계 기록이며, 현재 런타임은 `paired_tasks.id`를 Goal ID로 사용하고
+> `plan_notes` version 1 JSON을 Checklist step 데이터로 사용합니다.
+> Supervisor counter/state가 실행 제어의 SSOT이고 `plan_notes`는 step 순서와
+> 요약만 저장합니다.
+
 ## 목표
 
 - 장기 리팩토링/장기 과제가 중간 `DONE`에서 끊기지 않게 한다.

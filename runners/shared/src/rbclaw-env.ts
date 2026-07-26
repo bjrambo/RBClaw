@@ -8,6 +8,7 @@ export const RBCLAW_ENV = {
   ipcDir: 'RBCLAW_IPC_DIR',
   isMain: 'RBCLAW_IS_MAIN',
   roomRole: 'RBCLAW_ROOM_ROLE',
+  pairedTaskId: 'RBCLAW_PAIRED_TASK_ID',
   runId: 'RBCLAW_RUN_ID',
   runtimeTaskId: 'RBCLAW_RUNTIME_TASK_ID',
   workDir: 'RBCLAW_WORK_DIR',

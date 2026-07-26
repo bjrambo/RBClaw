@@ -128,6 +128,16 @@ export interface WebDashboardRoomActivity {
     title: string | null;
     status: PairedTask['status'];
     roundTripCount: number;
+    supervisorState?: PairedTask['supervisor_state'];
+    episodeNumber?: number;
+    episodeRoundTrips?: number;
+    totalRoundTrips?: number;
+    arbitrationCount?: number;
+    stagnationCount?: number;
+    lastBlockerClass?: PairedTask['last_blocker_class'];
+    resumeAt?: string | null;
+    progressFingerprintPrefix?: string | null;
+    supervisorStateChangedAt?: string | null;
     updatedAt: string;
     currentTurn: WebDashboardRoomTurn | null;
     outputs: WebDashboardRoomTurnOutput[];
@@ -712,6 +722,20 @@ export function buildWebDashboardRoomActivity(args: {
           title: args.pairedTask.title,
           status: args.pairedTask.status,
           roundTripCount: args.pairedTask.round_trip_count,
+          supervisorState: args.pairedTask.supervisor_state ?? 'runnable',
+          episodeNumber: args.pairedTask.episode_number ?? 1,
+          episodeRoundTrips: args.pairedTask.round_trip_count,
+          totalRoundTrips:
+            args.pairedTask.total_round_trip_count ??
+            args.pairedTask.round_trip_count,
+          arbitrationCount: args.pairedTask.arbitration_count ?? 0,
+          stagnationCount: args.pairedTask.stagnation_count ?? 0,
+          lastBlockerClass: args.pairedTask.last_blocker_class ?? null,
+          resumeAt: args.pairedTask.resume_at ?? null,
+          progressFingerprintPrefix:
+            args.pairedTask.progress_fingerprint?.slice(0, 12) ?? null,
+          supervisorStateChangedAt:
+            args.pairedTask.supervisor_state_changed_at ?? null,
           updatedAt: args.pairedTask.updated_at,
           currentTurn: currentTurn
             ? sanitizeRoomTurn(currentTurn, currentAttempt)

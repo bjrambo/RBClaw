@@ -15,7 +15,7 @@ import {
   getAllOpenPairedTasks,
   deleteTask,
   getDueTasks,
-  hasActiveCiWatcherForChat,
+  hasActiveCiWatcherForGoal,
   getTaskById,
   logTaskRun,
   updateTask,
@@ -52,6 +52,10 @@ import {
   requeueRecoverablePendingPairedFollowUps,
   schedulePairedFollowUpOnce,
 } from './paired-follow-up-scheduler.js';
+import {
+  isPairedTaskRetryDue,
+  transitionPairedSupervisorState,
+} from './paired-supervisor-state.js';
 import {
   hasTaskExceededMaxDuration,
   resolveTaskExecutionContext,
@@ -553,7 +557,8 @@ export async function runSchedulerTickOnce(
   // Unified service: process all agent types, not just the service default.
   const nowMs = Date.now();
   reconcileRecoverablePendingPairedTurnReservations(deps);
-  reconcileOrphanedPairedReviewReadyTasks(deps);
+  wakeDuePairedRetryTasks();
+  reconcileOrphanedRunnablePairedTasks(deps);
   const activeTasks = getAllTasks().filter((task) => task.status === 'active');
 
   for (const task of activeTasks) {
@@ -636,14 +641,47 @@ function reconcileRecoverablePendingPairedTurnReservations(
   }
 }
 
-function reconcileOrphanedPairedReviewReadyTasks(
+function wakeDuePairedRetryTasks(): void {
+  const now = new Date();
+  for (const task of getAllOpenPairedTasks()) {
+    if (!isPairedTaskRetryDue(task, now)) {
+      continue;
+    }
+    transitionPairedSupervisorState({
+      task,
+      nextState: 'runnable',
+      reason: 'retry-backoff-elapsed',
+      now: now.toISOString(),
+      patch: {
+        resume_at: null,
+        last_blocker_class: null,
+      },
+    });
+  }
+}
+
+function reconcileOrphanedRunnablePairedTasks(
   deps: SchedulerDependencies,
 ): void {
   for (const task of getAllOpenPairedTasks()) {
-    if (task.status !== 'review_ready') {
+    const intentKind =
+      task.status === 'active'
+        ? ('owner-follow-up' as const)
+        : task.status === 'review_ready' || task.status === 'in_review'
+          ? ('reviewer-turn' as const)
+          : task.status === 'arbiter_requested' ||
+              task.status === 'in_arbitration'
+            ? ('arbiter-turn' as const)
+            : task.status === 'merge_ready'
+              ? ('finalize-owner-turn' as const)
+              : null;
+    if (!intentKind) {
       continue;
     }
-    if (hasActiveCiWatcherForChat(task.chat_jid)) {
+    if (
+      (task.status === 'review_ready' || task.status === 'in_review') &&
+      hasActiveCiWatcherForGoal(task.chat_jid, task.id)
+    ) {
       continue;
     }
 
@@ -651,7 +689,7 @@ function reconcileOrphanedPairedReviewReadyTasks(
       chatJid: task.chat_jid,
       runId: `scheduler-review-ready-${Date.now().toString(36)}`,
       task,
-      intentKind: 'reviewer-turn',
+      intentKind,
       enqueue: () =>
         deps.queue.enqueueMessageCheck(
           task.chat_jid,
@@ -670,7 +708,7 @@ function reconcileOrphanedPairedReviewReadyTasks(
         groupFolder: task.group_folder,
         status: task.status,
       },
-      'Re-queued orphaned review_ready paired task without active CI watcher',
+      'Re-queued orphaned runnable paired task',
     );
   }
 }
