@@ -142,4 +142,102 @@ describe('persisted delivery idempotency', () => {
       last_blocker_class: 'external',
     });
   });
+
+  it('removes tracked progress after replacement fails and fallback delivery succeeds', async () => {
+    const item = createProducedWorkItem({
+      group_folder: 'room',
+      chat_jid: 'dc:delivery',
+      agent_type: 'claude-code',
+      delivery_role: 'reviewer',
+      delivery_key_seed: 'run-long-final',
+      start_seq: 1,
+      end_seq: 2,
+      result_payload: 'x'.repeat(2_017),
+    });
+    const editMessage = vi
+      .fn()
+      .mockRejectedValue(new Error('Must be 2000 or fewer in length'));
+    const sendMessage = vi.fn().mockResolvedValue({
+      primaryMessageId: 'final-1',
+      messageIds: ['final-1', 'final-2'],
+      visible: true,
+    });
+    const deleteMessage = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      deliverOpenWorkItem({
+        channel: channel({ editMessage, sendMessage, deleteMessage }),
+        item,
+        log,
+        replaceMessageId: 'progress-1',
+        isDuplicateOfLastBotFinal: () => false,
+        openContinuation: vi.fn(),
+      }),
+    ).resolves.toBe(true);
+
+    expect(editMessage).toHaveBeenCalledWith(
+      'dc:delivery',
+      'progress-1',
+      item.result_payload,
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      'dc:delivery',
+      item.result_payload,
+      { deliveryKey: item.delivery_key },
+    );
+    expect(deleteMessage).toHaveBeenCalledWith('dc:delivery', 'progress-1');
+    expect(sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteMessage.mock.invocationCallOrder[0],
+    );
+    expect(getWorkItemById(item.id)).toMatchObject({
+      status: 'delivered',
+      delivery_message_id: 'final-1',
+    });
+  });
+
+  it('keeps fallback delivery complete when tracked progress cleanup fails', async () => {
+    const item = createProducedWorkItem({
+      group_folder: 'room',
+      chat_jid: 'dc:delivery',
+      agent_type: 'claude-code',
+      delivery_role: 'reviewer',
+      delivery_key_seed: 'run-cleanup-failure',
+      start_seq: 1,
+      end_seq: 2,
+      result_payload: 'final result',
+    });
+    const cleanupError = new Error('Missing Permissions');
+
+    await expect(
+      deliverOpenWorkItem({
+        channel: channel({
+          editMessage: vi.fn().mockRejectedValue(new Error('edit failed')),
+          sendMessage: vi.fn().mockResolvedValue({
+            primaryMessageId: 'final-1',
+            messageIds: ['final-1'],
+            visible: true,
+          }),
+          deleteMessage: vi.fn().mockRejectedValue(cleanupError),
+        }),
+        item,
+        log,
+        replaceMessageId: 'progress-1',
+        isDuplicateOfLastBotFinal: () => false,
+        openContinuation: vi.fn(),
+      }),
+    ).resolves.toBe(true);
+
+    expect(getWorkItemById(item.id)).toMatchObject({
+      status: 'delivered',
+      delivery_message_id: 'final-1',
+    });
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryMode: 'send',
+        replacedMessageId: 'progress-1',
+        err: cleanupError,
+      }),
+      'Failed to remove tracked progress message after fallback delivery',
+    );
+  });
 });

@@ -1178,6 +1178,34 @@ describe('delivery idempotency', () => {
   });
 });
 
+describe('deleteMessage', () => {
+  it('deletes the requested Discord message', async () => {
+    const channel = new DiscordChannel('test-token', createTestOpts());
+    await channel.connect();
+
+    const deleteMessage = vi.fn().mockResolvedValue(undefined);
+    const fetchMessage = vi.fn().mockResolvedValue({
+      delete: deleteMessage,
+    });
+    currentClient().channels.fetch.mockResolvedValue({
+      messages: { fetch: fetchMessage },
+    });
+
+    await channel.deleteMessage('dc:1234567890123456', 'progress-1');
+
+    expect(fetchMessage).toHaveBeenCalledWith('progress-1');
+    expect(deleteMessage).toHaveBeenCalledOnce();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jid: 'dc:1234567890123456',
+        deliveryMode: 'delete',
+        messageId: 'progress-1',
+      }),
+      'Discord message deleted',
+    );
+  });
+});
+
 // --- ownsJid ---
 
 describe('ownsJid', () => {

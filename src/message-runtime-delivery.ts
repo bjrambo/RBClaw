@@ -27,6 +27,34 @@ function buildDeliveryLogContext(
   };
 }
 
+async function removeReplacedProgressMessage(args: {
+  channel: Channel;
+  item: WorkItem;
+  log: RuntimeDeliveryLog;
+  replaceMessageId: string | null;
+}): Promise<void> {
+  if (!args.replaceMessageId || !args.channel.deleteMessage) return;
+  try {
+    await args.channel.deleteMessage(args.item.chat_jid, args.replaceMessageId);
+    args.log.info(
+      buildDeliveryLogContext(args.channel, args.item, {
+        deliveryMode: 'send',
+        replacedMessageId: args.replaceMessageId,
+      }),
+      'Removed tracked progress message after fallback delivery',
+    );
+  } catch (err) {
+    args.log.warn(
+      buildDeliveryLogContext(args.channel, args.item, {
+        deliveryMode: 'send',
+        replacedMessageId: args.replaceMessageId,
+        err,
+      }),
+      'Failed to remove tracked progress message after fallback delivery',
+    );
+  }
+}
+
 export async function deliverOpenWorkItem(args: {
   channel: Channel;
   item: WorkItem;
@@ -127,6 +155,12 @@ export async function deliverOpenWorkItem(args: {
             args.item.chat_jid,
             args.item.result_payload,
           );
+    await removeReplacedProgressMessage({
+      channel: args.channel,
+      item: args.item,
+      log: args.log,
+      replaceMessageId,
+    });
     markWorkItemDelivered(
       args.item.id,
       sendResult

@@ -3,6 +3,100 @@ import type { Client, TextChannel } from 'discord.js';
 import { logger } from '../logger.js';
 import type { DeleteRecentMessagesByContentOptions } from '../types.js';
 
+export async function deleteDiscordMessage(args: {
+  client: Client | null;
+  channelName: string;
+  jid: string;
+  messageId: string;
+}): Promise<void> {
+  if (!args.client) {
+    throw new Error('Discord client not initialized');
+  }
+  try {
+    const channelId = args.jid.replace(/^dc:/, '');
+    const channel = await args.client.channels.fetch(channelId);
+    if (!channel || !('messages' in channel)) {
+      throw new Error(`Discord channel not found or not editable: ${args.jid}`);
+    }
+    const message = await (channel as TextChannel).messages.fetch(
+      args.messageId,
+    );
+    await message.delete();
+    logger.info(
+      {
+        jid: args.jid,
+        channelName: args.channelName,
+        deliveryMode: 'delete',
+        messageId: args.messageId,
+        botUserId: args.client.user?.id ?? null,
+        botUsername: args.client.user?.username ?? null,
+      },
+      'Discord message deleted',
+    );
+  } catch (err) {
+    logger.debug(
+      {
+        jid: args.jid,
+        channelName: args.channelName,
+        messageId: args.messageId,
+        botUserId: args.client.user?.id ?? null,
+        botUsername: args.client.user?.username ?? null,
+        err,
+      },
+      'Failed to delete Discord message',
+    );
+    throw err;
+  }
+}
+
+export async function editDiscordMessage(args: {
+  client: Client | null;
+  channelName: string;
+  jid: string;
+  messageId: string;
+  text: string;
+}): Promise<void> {
+  if (!args.client) {
+    throw new Error('Discord client not initialized');
+  }
+  try {
+    const channelId = args.jid.replace(/^dc:/, '');
+    const channel = await args.client.channels.fetch(channelId);
+    if (!channel || !('messages' in channel)) {
+      throw new Error(`Discord channel not found or not editable: ${args.jid}`);
+    }
+    const message = await (channel as TextChannel).messages.fetch(
+      args.messageId,
+    );
+    await message.edit(args.text);
+    logger.info(
+      {
+        jid: args.jid,
+        channelName: args.channelName,
+        deliveryMode: 'edit',
+        messageId: args.messageId,
+        length: args.text.length,
+        botUserId: args.client.user?.id ?? null,
+        botUsername: args.client.user?.username ?? null,
+      },
+      'Discord message edited',
+    );
+  } catch (err) {
+    logger.debug(
+      {
+        jid: args.jid,
+        channelName: args.channelName,
+        messageId: args.messageId,
+        botUserId: args.client.user?.id ?? null,
+        botUsername: args.client.user?.username ?? null,
+        err,
+      },
+      'Failed to edit Discord message',
+    );
+    throw err;
+  }
+}
+
 export async function deleteRecentDiscordMessagesByContent(args: {
   client: Client | null;
   channelName: string;

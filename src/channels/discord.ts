@@ -28,7 +28,11 @@ import {
   isDashboardTrackedSend,
 } from './discord-dashboard-create-cleanup.js';
 import { describeDownloadedAttachment } from './discord-attachments.js';
-import { deleteRecentDiscordMessagesByContent } from './discord-message-cleanup.js';
+import {
+  deleteDiscordMessage,
+  deleteRecentDiscordMessagesByContent,
+  editDiscordMessage,
+} from './discord-message-cleanup.js';
 import { prepareDiscordOutbound } from './discord-outbound.js';
 import { createDeliverySender } from './discord-delivery-idempotency.js';
 
@@ -897,43 +901,22 @@ export class DiscordChannel implements Channel {
     messageId: string,
     text: string,
   ): Promise<void> {
-    if (!this.client) {
-      throw new Error('Discord client not initialized');
-    }
-    try {
-      const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !('messages' in channel)) {
-        throw new Error(`Discord channel not found or not editable: ${jid}`);
-      }
-      const msg = await (channel as TextChannel).messages.fetch(messageId);
-      await msg.edit(text);
-      logger.info(
-        {
-          jid,
-          channelName: this.name,
-          deliveryMode: 'edit',
-          messageId,
-          length: text.length,
-          botUserId: this.client.user?.id ?? null,
-          botUsername: this.client.user?.username ?? null,
-        },
-        'Discord message edited',
-      );
-    } catch (err) {
-      logger.debug(
-        {
-          jid,
-          channelName: this.name,
-          messageId,
-          botUserId: this.client?.user?.id ?? null,
-          botUsername: this.client?.user?.username ?? null,
-          err,
-        },
-        'Failed to edit Discord message',
-      );
-      throw err; // Re-throw so callers (e.g. dashboard) can reset message ID
-    }
+    return editDiscordMessage({
+      client: this.client,
+      channelName: this.name,
+      jid,
+      messageId,
+      text,
+    });
+  }
+
+  async deleteMessage(jid: string, messageId: string): Promise<void> {
+    return deleteDiscordMessage({
+      client: this.client,
+      channelName: this.name,
+      jid,
+      messageId,
+    });
   }
 }
 
