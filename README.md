@@ -150,92 +150,151 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
                     paired_turn_outputs            Discord display
 ```
 
-## 시작하기
+## 초보자 설치 가이드
 
-### 요구사항
+처음에는 **Owner 봇 하나와 Codex 하나만 연결해 첫 응답을 확인**하는 것이
+가장 쉽습니다. 이 경로가 성공한 뒤 Reviewer와 Arbiter를 추가하면 어느
+단계에서 문제가 생겼는지 구분하기 쉽습니다.
 
-- Linux(Ubuntu 22.04+)와 systemd user service
+설치 과정에서 토큰, API 키, OAuth 코드는 채팅이나 이슈에 올리지 마세요.
+아래 명령은 RBClaw을 실행할 일반 사용자 계정으로 수행하고, `sudo`는 시스템
+패키지를 설치할 때만 사용합니다.
+
+### 1. 준비물
+
+초보자에게 권장하는 환경은 Ubuntu 22.04 이상과 systemd user service입니다.
+
+- Discord 서버에서 봇을 초대할 수 있는 권한
 - Node.js 20 이상
-- [Bun](https://bun.sh/) 1.3+
-- Git, `gcc`, `make`
-- reviewer / arbiter 격리를 위한 `bubblewrap`, `socat`, user namespace와
-  `/usr/bin/unshare`
-- Claude Code CLI
-- Codex CLI
-- Discord 봇 토큰(owner 필수, tribunal은 reviewer, arbiter 사용 시 arbiter)
+- [Bun 1.3 이상](https://bun.sh/docs/installation)
+- Git, `gcc`, `make`, `bubblewrap`, `socat`, `/usr/bin/unshare`
+- Owner가 사용할 Codex 또는 Claude 계정
+- Tribunal을 사용할 경우 Reviewer용 Claude 또는 Codex 계정
 
-현재 runner 번들 기준 버전:
+Ubuntu 시스템 도구를 먼저 설치합니다.
+
+```bash
+sudo apt update
+sudo apt install -y build-essential bubblewrap curl git socat unzip util-linux
+```
+
+Node.js 20 이상을 설치한 뒤 버전을 확인합니다. Bun이 없다면 공식 설치
+스크립트를 사용하고 새 터미널을 엽니다.
+
+```bash
+node --version
+
+curl -fsSL https://bun.com/install | bash
+bun --version
+```
+
+각 명령은 `node`가 `v20` 이상, `bun`이 `1.3` 이상을 출력해야 합니다.
+
+### 2. AI CLI 설치와 로그인
+
+가장 쉬운 첫 실행은 Owner를 Codex로 사용하는 것입니다.
+
+```bash
+npm install -g @openai/codex
+codex login
+codex login status
+```
+
+Tribunal에서 Claude Reviewer를 사용할 계획이면 Claude Code도 준비합니다.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude auth login --claudeai
+claude auth status --text
+```
+
+두 CLI 모두 **RBClaw 서비스를 실행할 같은 OS 사용자 계정**에서 로그인해야
+합니다. 서버가 headless 환경이면 터미널에 표시된 공식 로그인 URL을 다른
+기기의 브라우저에서 열어 승인할 수 있습니다.
+
+현재 runner 번들 기준 버전은 다음과 같습니다.
 
 - Claude Agent SDK: `@anthropic-ai/claude-agent-sdk@0.3.153`
 - Codex SDK/CLI: `@openai/codex@0.144.1`
 
-Ubuntu에서는 시스템 패키지를 먼저 준비합니다.
+### 3. Discord Owner 봇 만들기
 
-```bash
-sudo apt update
-sudo apt install -y build-essential bubblewrap git socat util-linux
-```
+[Discord Developer Portal](https://discord.com/developers/applications)에서
+애플리케이션을 하나 만들고 다음 순서로 설정합니다.
 
-### Discord 봇 준비
+1. **Bot** 메뉴에서 Owner 봇 토큰을 발급해 비밀번호 관리자에 보관합니다.
+2. **Message Content Intent**를 활성화합니다.
+3. **Installation** 또는 **OAuth2**에서 `bot` scope를 선택합니다.
+4. View Channel, Send Messages, Read Message History, Attach Files,
+   Embed Links 권한을 선택하고 봇을 서버에 초대합니다.
+5. Discord 사용자 설정의 **개발자 모드**를 켜고 제어할 채널의 ID를
+   복사합니다.
 
-Discord Developer Portal에서 owner, reviewer, arbiter용 애플리케이션과 봇을
-각각 만듭니다.
+Reviewer와 Arbiter 봇은 첫 응답을 확인한 뒤 같은 방법으로 추가해도 됩니다.
+각 역할은 별도 Discord 봇 토큰을 사용합니다.
 
-1. 세 봇 모두 **Message Content Intent**를 활성화합니다.
-2. OAuth2의 `bot` scope로 서버에 초대합니다.
-3. 사용할 채널에 View Channel, Send Messages, Read Message History,
-   Attach Files, Embed Links 권한을 부여합니다.
-4. Discord의 개발자 모드를 켜고 최초 제어 채널 ID를 복사합니다.
-
-owner 봇은 항상 필요합니다. tribunal room에는 reviewer 봇이 필요하고,
-arbiter를 사용하려면 arbiter 봇과 `ARBITER_AGENT_TYPE` 설정이 필요합니다.
-토큰은 채팅, 문서, 이슈에 붙이지 않습니다.
-
-### 설치와 초기 설정
+### 4. RBClaw 내려받기
 
 ```bash
 git clone https://github.com/bjrambo/RBClaw.git
 cd RBClaw
 bash setup.sh
-cp .env.example .env
 ```
 
-`.env`에는 사용할 역할의 Discord 토큰과 provider 설정을 입력합니다.
-전체 키 설명은 [docs/configuration.md](docs/configuration.md)를 봅니다.
+마지막 출력에서 다음 항목을 확인합니다.
+
+```text
+BUN_OK: true
+DEPS_OK: true
+STATUS: success
+```
+
+실패하면 먼저 `logs/setup.log`를 확인합니다. `setup.sh`는 시스템 패키지나
+Bun을 자동 설치하지 않고, Bun 의존성을 설치한 뒤 상태를 보고합니다.
+
+### 5. 최소 환경 설정
+
+예시 파일을 복사하고 `.env`를 편집합니다.
 
 ```bash
-DISCORD_OWNER_BOT_TOKEN=       # 필수
-DISCORD_REVIEWER_BOT_TOKEN=    # tribunal room 사용 시
-DISCORD_ARBITER_BOT_TOKEN=     # arbiter 사용 시
-
-OWNER_AGENT_TYPE=codex
-REVIEWER_AGENT_TYPE=claude-code
-
-# Arbiter를 사용할 때만 활성화
-# ARBITER_AGENT_TYPE=codex
-
-CLAUDE_CODE_OAUTH_TOKENS=
+cp .env.example .env
+nano .env
 ```
 
-Codex는 서비스를 실행할 OS 계정의 Codex CLI OAuth 세션을 사용합니다.
-Claude Code도 같은 계정에서 CLI 로그인을 완료하거나
-`CLAUDE_CODE_OAUTH_TOKENS`를 설정해야 합니다. `.env` 권한은 다른 사용자가
-읽지 못하도록 제한하는 것을 권장합니다.
+첫 실행에서는 아래 항목만 확인하면 됩니다. 실제 토큰 값은 README 예시에
+적지 않습니다.
+
+```bash
+DISCORD_OWNER_BOT_TOKEN=<Owner 봇 토큰>
+OWNER_AGENT_TYPE=codex
+ASSISTANT_NAME=claude
+```
+
+CLI 로그인을 사용하면 `OPENAI_API_KEY`를 `.env`에 넣지 않습니다. Reviewer를
+아직 사용하지 않는다면 Reviewer와 Arbiter 토큰은 빈 값으로 둡니다.
 
 ```bash
 chmod 600 .env
 ```
 
-환경과 runner를 확인합니다.
+전체 환경 변수와 역할별 모델 설정은
+[설정 문서](docs/configuration.md)를 참고합니다.
+
+### 6. 환경과 runner 확인
 
 ```bash
 bun run setup -- --step environment
 bun run setup -- --step runners
 ```
 
-최초 owner 제어 채널을 main room으로 등록합니다. JID는
-`dc:<Discord channel ID>` 형식이고, `--trigger`나
-`--no-trigger-required` 옵션은 사용하지 않습니다.
+첫 명령은 OS, `.env`, sandbox 도구, 기존 room 상태를 확인합니다. 두 번째
+명령은 Codex와 Claude runner를 모두 빌드합니다. 성공하면 각 출력의 마지막
+상태가 `STATUS: success`여야 합니다.
+
+### 7. 최초 제어 채널 등록
+
+아래 숫자를 앞에서 복사한 Discord 채널 ID로 바꿉니다. JID의 `dc:` 접두사는
+삭제하지 않습니다.
 
 ```bash
 bun run setup -- --step register -- \
@@ -246,20 +305,61 @@ bun run setup -- --step register -- \
   --is-main
 ```
 
-서비스를 설치하고 전체 상태를 검증합니다.
+최초 room은 Owner만 실행하는 `single` 모드로 등록됩니다. `folder`는 영문이나
+숫자로 시작하고 영문, 숫자, `_`, `-`만 사용하는 64자 이하의 고유한 이름으로
+지정합니다. `global`은 예약된 이름입니다.
+
+### 8. 서비스 시작과 첫 응답 확인
 
 ```bash
 bun run setup -- --step service
 bun run setup -- --step verify
 ```
 
-Linux에서는 `~/.config/systemd/user/rbclaw.service`가 설치됩니다. 최초 main
-room의 `workDir`가 비어 있으면 서비스 프로젝트 루트로 한 번 복구됩니다.
+Linux에서는 `~/.config/systemd/user/rbclaw.service`가 설치됩니다. 검증 출력의
+마지막이 `STATUS: success`인지 확인한 뒤, 등록한 Discord 채널에서 Owner
+봇에게 간단한 메시지를 보냅니다.
 
-### 추가 room 등록
+```text
+안녕. 현재 작업 폴더와 브랜치만 알려줘.
+```
 
-추가 room은 main room에서 `assign_room` 도구로 등록합니다. Discord main
-room에 다음과 같이 요청하면 됩니다.
+응답이 오면 기본 설치가 끝난 것입니다. 응답이 없으면 다음 순서로 확인합니다.
+
+```bash
+systemctl --user status rbclaw --no-pager --lines=50
+journalctl --user -u rbclaw --since "10 minutes ago" --no-pager
+tail -n 100 logs/rbclaw.error.log
+```
+
+### 9. Tribunal 확장
+
+Owner가 정상 응답한 뒤 Reviewer를 추가합니다.
+
+1. Discord Developer Portal에서 Reviewer 봇을 만들고 Owner와 같은 권한을
+   부여합니다.
+2. Claude Code 또는 Reviewer로 사용할 provider의 CLI 로그인을 완료합니다.
+3. `.env`에 Reviewer 토큰과 provider를 설정합니다.
+
+```bash
+DISCORD_REVIEWER_BOT_TOKEN=<Reviewer 봇 토큰>
+REVIEWER_AGENT_TYPE=claude-code
+```
+
+설정을 읽도록 서비스를 재시작합니다.
+
+```bash
+systemctl --user restart rbclaw
+bun run setup -- --step verify
+```
+
+Linux에서는 `bun run setup -- --step environment` 출력의
+`HAS_BWRAP_READONLY_SANDBOX_CAPABILITY`도 `true`여야 합니다. `false`이면
+Reviewer는 안전을 위해 실행을 거부합니다. 이 경우 전체 setup을 root로
+실행하지 말고 `logs/setup.log`와 호스트의 AppArmor/user namespace 정책을
+시스템 관리자와 확인합니다.
+
+그다음 main room에서 개발 채널을 Tribunal room으로 등록하도록 요청합니다.
 
 ```text
 다음 채널을 assign_room으로 등록해줘.
@@ -273,12 +373,10 @@ requires_trigger: false
 ```
 
 - `assign_room`은 main room에서만 실행할 수 있습니다.
-- `room_mode`는 `single` 또는 `tribunal`입니다.
 - `work_dir`는 실제로 존재하는 절대경로여야 합니다.
-- `folder`, 역할별 model / effort, arbiter provider도 room별로 덮어쓸 수
-  있습니다.
-- `workDir`는 기본 cwd와 잠금 기준이며, 별도 승인된 외부 경로 접근을
-  차단하는 경계가 아닙니다.
+- `single`은 Owner만, `tribunal`은 Owner와 Reviewer를 실행합니다.
+- Arbiter가 필요하면 세 번째 Discord 봇 토큰과 `ARBITER_AGENT_TYPE`을 설정한
+  뒤 room에 Arbiter provider를 지정합니다.
 
 ### 개인 페르소나와 로컬 규칙
 
@@ -289,27 +387,13 @@ requires_trigger: false
 cp prompts/CUSTOM.example.md prompts/CUSTOM.md
 ```
 
-- `prompts/CUSTOM.md`는 owner 프롬프트 맨 앞에 한 번 주입됩니다.
-- reviewer와 arbiter에는 주입되지 않아 독립적인 검증 역할을 유지합니다.
-- 이 파일은 Git에서 제외되므로 개인 설정을 공개 저장소에 커밋하지 않습니다.
-- 비밀번호, 토큰, 개인키 같은 자격증명은 저장하지 말고 `.env` 또는 지원되는
-  비밀 저장소를 사용합니다.
+- `prompts/CUSTOM.md`는 Owner 프롬프트에만 주입됩니다.
+- Reviewer와 Arbiter에는 주입되지 않아 독립적인 검증 역할을 유지합니다.
+- 이 파일은 Git에서 제외됩니다.
+- 비밀번호, 토큰, 개인키는 저장하지 않습니다.
 
-자세한 작성 항목은
+작성 예시는
 [`prompts/CUSTOM.example.md`](prompts/CUSTOM.example.md)를 참고합니다.
-
-### 개발 실행
-
-```bash
-bun run dev
-```
-
-프로덕션 서비스 상태와 로그는 다음 명령으로 확인합니다.
-
-```bash
-systemctl --user status rbclaw --no-pager --lines=20
-journalctl --user -u rbclaw -f
-```
 
 ### 웹 대시보드
 
@@ -323,36 +407,25 @@ WEB_DASHBOARD_PORT=8734
 WEB_DASHBOARD_TOKEN=replace-with-a-long-random-token
 ```
 
-기본 주소는 `http://127.0.0.1:8734`입니다. 조회 전용 localhost 사용은
-토큰 없이 가능하지만 메시지 전송, 설정 변경, 서비스 재시작 같은 mutating
-API에는 `WEB_DASHBOARD_TOKEN`이 필요합니다. 다른 장치에서 접근할 때는
-Tailscale, VPN 또는 SSH tunnel을 사용하고 토큰을 설정합니다. 공개
-인터넷에는 HTTPS reverse proxy와 접근 제어 없이 노출하지 않습니다.
+기본 주소는 `http://127.0.0.1:8734`입니다. 다른 장치에서 접근할 때는
+Tailscale, VPN 또는 SSH tunnel을 사용하고 토큰을 설정합니다. 공개 인터넷에
+HTTPS와 접근 제어 없이 노출하지 않습니다.
 
-### 배포
+### 업데이트와 배포
 
 ```bash
 bun run deploy
 ```
 
-이 스크립트는 다음을 순서대로 수행합니다.
-
-1. Git 작업 트리가 깨끗한지 확인
-2. `git pull --ff-only`
-3. `bun install --frozen-lockfile`
-4. `bun run build:all`
-5. `bun run verify:dist`
-6. `migrate-room-registrations`
-7. `systemctl --user restart rbclaw`
-
-배포 후에는 서비스와 설치 상태를 다시 확인합니다.
+이 명령은 clean worktree 확인, `git pull --ff-only`, 의존성 설치, 전체 빌드,
+dist 검증, room migration, 서비스 재시작을 순서대로 수행합니다. 로컬 변경이나
+untracked 파일이 있으면 시작 전에 차단됩니다.
 
 ```bash
 systemctl --user status rbclaw --no-pager --lines=20
 bun run setup -- --step verify
 ```
 
-로컬 변경이나 untracked 파일이 있으면 배포가 시작되기 전에 차단됩니다.
 데이터베이스 마이그레이션과 서비스 재시작이 포함되므로 운영 환경에서는
 변경 내용을 검토하고 백업한 뒤 실행합니다.
 
@@ -383,6 +456,7 @@ bun run setup -- --step verify
 ## 개발
 
 ```bash
+bun run dev
 bun run build
 bun run build:runners
 bun run test
@@ -418,6 +492,7 @@ tail -n 100 logs/rbclaw.error.log
 
 ## 문서
 
+- [docs/easy-setup-wizard-design.md](docs/easy-setup-wizard-design.md) — 초보자용 간편 설치 wizard 설계
 - [docs/architecture.md](docs/architecture.md) — 데이터 모델, 실행 흐름, 주요 파일
 - [docs/configuration.md](docs/configuration.md) — `.env` 키와 디버깅 경로
 - [apps/android/README.md](apps/android/README.md) — Android companion 빌드와 연결
