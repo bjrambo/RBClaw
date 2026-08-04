@@ -147,4 +147,26 @@ describe('register step', () => {
     expect(readSpy).not.toHaveBeenCalled();
     expect(writeSpy).not.toHaveBeenCalled();
   });
+
+  it('passes a room-scoped review access profile to canonical assignment', async () => {
+    vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined);
+
+    await run([
+      '--jid',
+      'dc:review-room',
+      '--name',
+      'Review Room',
+      '--folder',
+      'review-room',
+      '--review-access-profile',
+      'egot-web-review',
+    ]);
+
+    expect(assignRoomMock).toHaveBeenCalledWith('dc:review-room', {
+      name: 'Review Room',
+      folder: 'review-room',
+      isMain: false,
+      reviewAccessProfile: 'egot-web-review',
+    });
+  });
 });

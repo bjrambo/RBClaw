@@ -7,6 +7,7 @@ export interface RbclawMcpServerConfigInput {
   isMain: boolean;
   agentType: string;
   roomRole: string;
+  pairedTaskId?: string;
   ipcDir?: string;
   hostIpcDir?: string;
 }
@@ -25,6 +26,9 @@ export function buildRbclawMcpServerConfig(
       [RBCLAW_ENV.isMain]: input.isMain ? '1' : '0',
       [RBCLAW_ENV.agentType]: input.agentType,
       [RBCLAW_ENV.roomRole]: input.roomRole,
+      ...(input.pairedTaskId && {
+        [RBCLAW_ENV.pairedTaskId]: input.pairedTaskId,
+      }),
       ...(input.ipcDir && {
         [RBCLAW_ENV.ipcDir]: input.ipcDir,
       }),

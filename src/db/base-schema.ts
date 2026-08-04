@@ -385,6 +385,7 @@ function applyRoomTables(database: Database): void {
       is_main INTEGER DEFAULT 0,
       owner_agent_type TEXT,
       work_dir TEXT,
+      review_access_profile TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL,
       CHECK (room_mode IN ('single', 'tribunal')),

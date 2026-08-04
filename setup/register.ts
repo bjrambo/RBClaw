@@ -18,6 +18,7 @@ interface RegisterArgs {
   folder: string;
   channel: string;
   isMain: boolean;
+  reviewAccessProfile?: string;
   assistantNameProvided: boolean;
 }
 
@@ -47,6 +48,9 @@ function parseArgs(args: string[]): RegisterArgs {
         break;
       case '--is-main':
         result.isMain = true;
+        break;
+      case '--review-access-profile':
+        result.reviewAccessProfile = args[++i] || '';
         break;
       case '--assistant-name':
         result.assistantNameProvided = true;
@@ -106,6 +110,7 @@ export async function run(args: string[]): Promise<void> {
     name: parsed.name,
     folder: parsed.folder,
     isMain: parsed.isMain,
+    reviewAccessProfile: parsed.reviewAccessProfile,
   });
   logger.info('Assigned room through canonical room service');
 

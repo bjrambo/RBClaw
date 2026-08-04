@@ -59,6 +59,12 @@ export async function handleHostEvidenceRequest(
     ref: typeof data.ref === 'string' ? data.ref : undefined,
     artifactKind:
       typeof data.artifact_kind === 'string' ? data.artifact_kind : undefined,
+    environment:
+      typeof data.environment === 'string' ? data.environment : undefined,
+    check: typeof data.check === 'string' ? data.check : undefined,
+    roomRole: typeof data.room_role === 'string' ? data.room_role : undefined,
+    pairedTaskId:
+      typeof data.paired_task_id === 'string' ? data.paired_task_id : undefined,
     sourceGroup,
     isMain,
   });
@@ -75,6 +81,10 @@ export async function handleHostEvidenceRequest(
       action: data.action,
       ok: result.ok,
       exitCode: result.exitCode,
+      roomRole: data.room_role,
+      pairedTaskId: data.paired_task_id,
+      environment: data.environment,
+      check: data.check,
     },
     'Processed host evidence request via IPC',
   );

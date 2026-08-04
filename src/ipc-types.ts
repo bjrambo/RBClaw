@@ -154,6 +154,7 @@ export interface TaskIpcPayload {
   arbiter_effort?: string;
   isMain?: boolean;
   workDir?: string;
+  review_access_profile?: string | null;
   scopeKind?: string;
   scopeKey?: string;
   content?: string;
@@ -173,6 +174,8 @@ export interface TaskIpcPayload {
   workflow_path?: string;
   ref?: string;
   artifact_kind?: string;
+  environment?: string;
+  check?: string;
   profile?: string;
   expected_snapshot_id?: string;
 }

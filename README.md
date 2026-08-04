@@ -370,6 +370,8 @@ work_dir: /absolute/path/to/project
 owner_agent_type: codex
 reviewer_agent_type: claude-code
 requires_trigger: false
+# 선택: Git 밖의 read-only 원격 진단 profile ID
+review_access_profile: my-web-review
 ```
 
 - `assign_room`은 main room에서만 실행할 수 있습니다.
@@ -377,6 +379,10 @@ requires_trigger: false
 - `single`은 Owner만, `tribunal`은 Owner와 Reviewer를 실행합니다.
 - Arbiter가 필요하면 세 번째 Discord 봇 토큰과 `ARBITER_AGENT_TYPE`을 설정한
   뒤 room에 Arbiter provider를 지정합니다.
+- `review_access_profile`은 선택 항목입니다. 설정한 방의 Reviewer에만
+  `inspect_remote`가 열리며, URL·SSH profile·서비스·로그·설정 경로는
+  private profile에서 가져옵니다. 형식과 보안 경계는
+  [설정 문서](docs/configuration.md#reviewer-원격-진단)를 참고합니다.
 
 ### 개인 페르소나와 로컬 규칙
 

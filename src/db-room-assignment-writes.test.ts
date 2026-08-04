@@ -33,6 +33,50 @@ beforeEach(() => {
 });
 
 describe('room assignment writes', () => {
+  it('stores, preserves, and clears a room-scoped review access profile', () => {
+    assignRoom('dc:review-access-room', {
+      name: 'Review Access Room',
+      roomMode: 'tribunal',
+      ownerAgentType: 'codex',
+      folder: 'review-access-room',
+      reviewAccessProfile: 'egot-web-review',
+    });
+    expect(getStoredRoomSettings('dc:review-access-room')).toMatchObject({
+      reviewAccessProfile: 'egot-web-review',
+    });
+
+    assignRoom('dc:review-access-room', {
+      name: 'Review Access Room',
+      roomMode: 'tribunal',
+      ownerAgentType: 'codex',
+    });
+    expect(getStoredRoomSettings('dc:review-access-room')).toMatchObject({
+      reviewAccessProfile: 'egot-web-review',
+    });
+
+    assignRoom('dc:review-access-room', {
+      name: 'Review Access Room',
+      roomMode: 'tribunal',
+      ownerAgentType: 'codex',
+      reviewAccessProfile: null,
+    });
+    expect(
+      getStoredRoomSettings('dc:review-access-room')?.reviewAccessProfile,
+    ).toBeUndefined();
+  });
+
+  it('rejects invalid review access profile ids', () => {
+    expect(() =>
+      assignRoom('dc:invalid-review-access-room', {
+        name: 'Invalid Review Access Room',
+        roomMode: 'tribunal',
+        ownerAgentType: 'codex',
+        folder: 'invalid-review-access-room',
+        reviewAccessProfile: '../secret',
+      }),
+    ).toThrow('Invalid review access profile');
+  });
+
   it('assigns a single room with an auto-generated folder', () => {
     const group = assignRoom('tg:-1001', {
       name: 'Telegram Dev Team',

@@ -6,11 +6,14 @@ import {
   DEPLOY_EVIDENCE_ACTIONS,
   GITHUB_EVIDENCE_ACTIONS,
   HOST_EVIDENCE_ACTIONS,
+  REMOTE_REVIEW_EVIDENCE_ACTIONS,
   isArtifactEvidenceKind,
   isDbEvidenceAction,
   isDeployEvidenceAction,
   isGitHubEvidenceAction,
   isHostEvidenceAction,
+  isRemoteReviewCheck,
+  isRemoteReviewEnvironment,
 } from '../src/evidence-actions.js';
 
 describe('evidence action constants', () => {
@@ -20,6 +23,7 @@ describe('evidence action constants', () => {
       'rbclaw_service_logs',
       'rbclaw_role_runtime_config',
       ...DEPLOY_EVIDENCE_ACTIONS,
+      ...REMOTE_REVIEW_EVIDENCE_ACTIONS,
       ...DB_EVIDENCE_ACTIONS,
       ...GITHUB_EVIDENCE_ACTIONS,
     ]);
@@ -30,6 +34,9 @@ describe('evidence action constants', () => {
     expect(isDbEvidenceAction('db_recent_scheduled_tasks')).toBe(true);
     expect(isDeployEvidenceAction('rbclaw_artifact_metadata')).toBe(true);
     expect(isGitHubEvidenceAction('github_workflow_file')).toBe(true);
+    expect(isRemoteReviewEnvironment('production')).toBe(true);
+    expect(isRemoteReviewCheck('inspect_config_shape')).toBe(true);
+    expect(isRemoteReviewCheck('../etc/shadow')).toBe(false);
     expect(isHostEvidenceAction('cat /etc/shadow')).toBe(false);
   });
 

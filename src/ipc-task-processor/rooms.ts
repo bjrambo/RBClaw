@@ -40,6 +40,7 @@ export function handleAssignRoom(
     requiresTrigger: data.requiresTrigger,
     isMain: data.isMain,
     workDir: data.workDir,
+    reviewAccessProfile: data.review_access_profile,
     ownerModelSelection: buildRoleModelSelection(
       data.owner_model,
       data.owner_effort,
@@ -164,6 +165,17 @@ function validateAssignRoomRequest(
       );
       return { ok: false };
     }
+  }
+  if (
+    data.review_access_profile !== undefined &&
+    data.review_access_profile !== null &&
+    typeof data.review_access_profile !== 'string'
+  ) {
+    logger.warn(
+      { sourceGroup },
+      'Invalid assign_room request - review_access_profile must be a string or null',
+    );
+    return { ok: false };
   }
   return { ok: true };
 }

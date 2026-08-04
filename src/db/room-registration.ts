@@ -31,6 +31,7 @@ export interface StoredRoomSettings {
   isMain?: boolean;
   ownerAgentType?: AgentType;
   workDir?: string;
+  reviewAccessProfile?: string;
 }
 
 export interface RoomRegistrationSnapshot {
@@ -41,6 +42,7 @@ export interface RoomRegistrationSnapshot {
   isMain: boolean;
   ownerAgentType: AgentType;
   workDir: string | null;
+  reviewAccessProfile?: string | null;
 }
 
 export interface RoomRoleOverrideSnapshot {
@@ -134,6 +136,17 @@ export function normalizeStoredAgentType(
     agentType === 'glm-code'
     ? agentType
     : undefined;
+}
+
+export function normalizeReviewAccessProfile(
+  value: string | null | undefined,
+): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(normalized)) {
+    throw new Error(`Invalid review access profile: ${value}`);
+  }
+  return normalized;
 }
 
 export function inferRoomModeFromRegisteredAgentTypes(
@@ -241,10 +254,23 @@ export function getStoredRoomSettingsRowFromDatabase(
   database: Database,
   chatJid: string,
 ): StoredRoomSettings | undefined {
+  const hasReviewAccessProfile = Boolean(
+    database
+      .prepare(
+        `SELECT 1 AS present
+           FROM pragma_table_info('room_settings')
+          WHERE name = 'review_access_profile'`,
+      )
+      .get(),
+  );
+  const reviewAccessProfileSelect = hasReviewAccessProfile
+    ? 'review_access_profile'
+    : 'NULL AS review_access_profile';
   const row = database
     .prepare(
       `SELECT room_mode, mode_source, name, folder, trigger_pattern,
-              requires_trigger, is_main, owner_agent_type, work_dir
+              requires_trigger, is_main, owner_agent_type, work_dir,
+              ${reviewAccessProfileSelect}
        FROM room_settings
        WHERE chat_jid = ?`,
     )
@@ -259,6 +285,7 @@ export function getStoredRoomSettingsRowFromDatabase(
         is_main: number | null;
         owner_agent_type: string | null;
         work_dir: string | null;
+        review_access_profile: string | null;
       }
     | undefined;
   const roomMode =
@@ -280,6 +307,9 @@ export function getStoredRoomSettingsRowFromDatabase(
     isMain: row.is_main === null ? undefined : row.is_main === 1,
     ownerAgentType: normalizeStoredAgentType(row.owner_agent_type),
     workDir: row.work_dir ?? undefined,
+    reviewAccessProfile: normalizeReviewAccessProfile(
+      row.review_access_profile,
+    ),
   };
 }
 
@@ -523,9 +553,10 @@ export function insertStoredRoomSettings(
         is_main,
         owner_agent_type,
         work_dir,
+        review_access_profile,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       chatJid,
@@ -538,6 +569,7 @@ export function insertStoredRoomSettings(
       snapshot.isMain ? 1 : 0,
       snapshot.ownerAgentType,
       snapshot.workDir,
+      normalizeReviewAccessProfile(snapshot.reviewAccessProfile) ?? null,
       now,
       now,
     );
@@ -560,9 +592,10 @@ export function insertStoredRoomSettingsFromMigration(
         is_main,
         owner_agent_type,
         work_dir,
+        review_access_profile,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chat_jid) DO NOTHING`,
     )
     .run(
@@ -576,6 +609,7 @@ export function insertStoredRoomSettingsFromMigration(
       plan.snapshot.isMain ? 1 : 0,
       plan.snapshot.ownerAgentType,
       plan.snapshot.workDir,
+      normalizeReviewAccessProfile(plan.snapshot.reviewAccessProfile) ?? null,
       plan.createdAt,
       plan.updatedAt,
     );

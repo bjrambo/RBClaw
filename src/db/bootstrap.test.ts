@@ -46,6 +46,7 @@ function getExpectedSchemaMigrations(): Array<{
     { version: 19, name: 'message_metadata' },
     { version: 20, name: 'direct_room_workdir' },
     { version: 21, name: 'persistent_supervisor' },
+    { version: 22, name: 'room_review_access' },
   ];
 }
 

@@ -21,6 +21,7 @@ import { PAIRED_TURN_OUTPUT_ATTACHMENTS_MIGRATION } from './018_paired-turn-outp
 import { MESSAGE_METADATA_MIGRATION } from './019_message-metadata.js';
 import { DIRECT_ROOM_WORKDIR_MIGRATION } from './020_direct-room-workdir.js';
 import { PERSISTENT_SUPERVISOR_MIGRATION } from './021_persistent-supervisor.js';
+import { ROOM_REVIEW_ACCESS_MIGRATION } from './022_room-review-access.js';
 import type {
   SchemaMigrationArgs,
   SchemaMigrationDefinition,
@@ -50,6 +51,7 @@ const ORDERED_SCHEMA_MIGRATIONS: readonly SchemaMigrationDefinition[] = [
   MESSAGE_METADATA_MIGRATION,
   DIRECT_ROOM_WORKDIR_MIGRATION,
   PERSISTENT_SUPERVISOR_MIGRATION,
+  ROOM_REVIEW_ACCESS_MIGRATION,
 ];
 
 function ensureSchemaMigrationsTable(database: Database): void {

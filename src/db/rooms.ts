@@ -15,6 +15,7 @@ import {
   inferRoomModeFromRegisteredAgentTypes,
   inferStoredRoomCapabilityTypes,
   insertStoredRoomSettings,
+  normalizeReviewAccessProfile,
   normalizeStoredAgentType,
   resolveAssignedRoomFolder,
   resolveStoredRoomCapabilityTypes,
@@ -58,6 +59,7 @@ export interface AssignRoomInput {
   requiresTrigger?: boolean;
   isMain?: boolean;
   workDir?: string;
+  reviewAccessProfile?: string | null;
   addedAt?: string;
   ownerAgentConfig?: RegisteredGroup['agentConfig'];
   ownerModelSelection?: RoleModelSelection;
@@ -216,6 +218,10 @@ export function assignRoomInDatabase(
     isMain: input.isMain ?? existing?.isMain ?? false,
     ownerAgentType,
     workDir: input.workDir ?? existing?.workDir ?? null,
+    reviewAccessProfile:
+      input.reviewAccessProfile === undefined
+        ? (existing?.reviewAccessProfile ?? null)
+        : (normalizeReviewAccessProfile(input.reviewAccessProfile) ?? null),
   };
   const now = new Date().toISOString();
 
@@ -233,6 +239,7 @@ export function assignRoomInDatabase(
                is_main = ?,
                owner_agent_type = ?,
                work_dir = ?,
+               review_access_profile = ?,
                updated_at = ?
            WHERE chat_jid = ?`,
         )
@@ -245,6 +252,7 @@ export function assignRoomInDatabase(
           snapshot.isMain ? 1 : 0,
           snapshot.ownerAgentType,
           snapshot.workDir,
+          snapshot.reviewAccessProfile ?? null,
           now,
           chatJid,
         );

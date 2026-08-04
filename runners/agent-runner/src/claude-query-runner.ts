@@ -198,6 +198,7 @@ class ClaudeQueryRunner {
           isMain: this.args.runnerInput.isMain,
           agentType: process.env[RBCLAW_ENV.agentType] || 'claude-code',
           roomRole: this.args.runnerInput.roomRoleContext?.role || '',
+          pairedTaskId: process.env[RBCLAW_ENV.pairedTaskId],
           ipcDir: process.env[RBCLAW_ENV.ipcDir],
           hostIpcDir: process.env[RBCLAW_ENV.hostIpcDir],
         }),

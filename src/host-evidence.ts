@@ -26,6 +26,9 @@ import type { AgentType } from './types.js';
 import {
   HOST_EVIDENCE_ACTIONS,
   isHostEvidenceAction,
+  isRemoteReviewCheck,
+  isRemoteReviewEnvironment,
+  isRemoteReviewEvidenceAction,
   type HostEvidenceAction,
 } from 'rbclaw-runners-shared';
 import {
@@ -39,6 +42,7 @@ import {
   runGitHubEvidenceCommand,
 } from './github-evidence.js';
 import { resolveGroupIpcPath } from './group-folder.js';
+import { runRemoteReviewInspection } from './remote-review-evidence.js';
 
 export { HOST_EVIDENCE_ACTIONS, isHostEvidenceAction, type HostEvidenceAction };
 
@@ -55,6 +59,10 @@ export interface HostEvidenceRequest {
   workflowPath?: string;
   ref?: string;
   artifactKind?: string;
+  environment?: string;
+  check?: string;
+  roomRole?: string;
+  pairedTaskId?: string;
   sourceGroup?: string;
   isMain?: boolean;
 }
@@ -300,6 +308,35 @@ export async function runHostEvidenceRequest(
         action: request.action,
         command: commandText,
         stdout: truncateHostEvidenceText(buildRoleRuntimeConfigEvidence()),
+        stderr: '',
+        exitCode: 0,
+      };
+    }
+
+    if (isRemoteReviewEvidenceAction(request.action)) {
+      commandText = `internal:${request.action}`;
+      if (!isRemoteReviewEnvironment(request.environment)) {
+        throw new Error('Invalid or missing remote review environment');
+      }
+      if (!isRemoteReviewCheck(request.check)) {
+        throw new Error('Invalid or missing remote review check');
+      }
+      return {
+        ok: true,
+        action: request.action,
+        command: commandText,
+        stdout: truncateHostEvidenceText(
+          await runRemoteReviewInspection(
+            {
+              sourceGroup: request.sourceGroup ?? '',
+              roomRole: request.roomRole,
+              pairedTaskId: request.pairedTaskId,
+              environment: request.environment,
+              check: request.check,
+            },
+            { database: requireDatabase() },
+          ),
+        ),
         stderr: '',
         exitCode: 0,
       };

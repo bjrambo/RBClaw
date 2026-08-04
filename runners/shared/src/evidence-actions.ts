@@ -11,6 +11,23 @@ export const DEPLOY_EVIDENCE_ACTIONS = [
   'rbclaw_artifact_metadata',
 ] as const;
 
+export const REMOTE_REVIEW_EVIDENCE_ACTIONS = [
+  'remote_review_inspect',
+] as const;
+
+export const REMOTE_REVIEW_ENVIRONMENTS = [
+  'development',
+  'production',
+] as const;
+
+export const REMOTE_REVIEW_CHECKS = [
+  'inspect_web',
+  'inspect_service_status',
+  'inspect_recent_logs',
+  'inspect_config_shape',
+  'compare_environments',
+] as const;
+
 export const GITHUB_EVIDENCE_ACTIONS = [
   'github_pr_status',
   'github_pr_diff_stat',
@@ -24,6 +41,7 @@ export const HOST_EVIDENCE_ACTIONS = [
   'rbclaw_service_logs',
   'rbclaw_role_runtime_config',
   ...DEPLOY_EVIDENCE_ACTIONS,
+  ...REMOTE_REVIEW_EVIDENCE_ACTIONS,
   ...DB_EVIDENCE_ACTIONS,
   ...GITHUB_EVIDENCE_ACTIONS,
 ] as const;
@@ -38,6 +56,11 @@ export const ARTIFACT_EVIDENCE_KINDS = [
 
 export type DbEvidenceAction = (typeof DB_EVIDENCE_ACTIONS)[number];
 export type DeployEvidenceAction = (typeof DEPLOY_EVIDENCE_ACTIONS)[number];
+export type RemoteReviewEvidenceAction =
+  (typeof REMOTE_REVIEW_EVIDENCE_ACTIONS)[number];
+export type RemoteReviewEnvironment =
+  (typeof REMOTE_REVIEW_ENVIRONMENTS)[number];
+export type RemoteReviewCheck = (typeof REMOTE_REVIEW_CHECKS)[number];
 export type GitHubEvidenceAction = (typeof GITHUB_EVIDENCE_ACTIONS)[number];
 export type HostEvidenceAction = (typeof HOST_EVIDENCE_ACTIONS)[number];
 export type ArtifactEvidenceKind = (typeof ARTIFACT_EVIDENCE_KINDS)[number];
@@ -57,6 +80,24 @@ export function isDeployEvidenceAction(
   value: unknown,
 ): value is DeployEvidenceAction {
   return includesEvidenceValue(DEPLOY_EVIDENCE_ACTIONS, value);
+}
+
+export function isRemoteReviewEvidenceAction(
+  value: unknown,
+): value is RemoteReviewEvidenceAction {
+  return includesEvidenceValue(REMOTE_REVIEW_EVIDENCE_ACTIONS, value);
+}
+
+export function isRemoteReviewEnvironment(
+  value: unknown,
+): value is RemoteReviewEnvironment {
+  return includesEvidenceValue(REMOTE_REVIEW_ENVIRONMENTS, value);
+}
+
+export function isRemoteReviewCheck(
+  value: unknown,
+): value is RemoteReviewCheck {
+  return includesEvidenceValue(REMOTE_REVIEW_CHECKS, value);
 }
 
 export function isGitHubEvidenceAction(

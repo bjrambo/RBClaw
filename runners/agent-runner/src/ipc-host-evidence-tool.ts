@@ -8,6 +8,8 @@ import {
   formatHostEvidenceResponse,
   GITHUB_EVIDENCE_ACTIONS,
   HOST_EVIDENCE_ACTIONS,
+  REMOTE_REVIEW_CHECKS,
+  REMOTE_REVIEW_ENVIRONMENTS,
   normalizeHostEvidenceTailLines,
   type HostEvidenceAction,
   waitForHostEvidenceResponse,
@@ -26,6 +28,8 @@ interface RegisterHostEvidenceToolsOptions {
   tasksDir: string;
   responseDir: string;
   groupFolder: string;
+  roomRole?: string;
+  pairedTaskId?: string;
   writeIpcFile: IpcWriter;
 }
 
@@ -42,6 +46,8 @@ async function requestHostEvidence(
     requestId,
     ...payload,
     groupFolder: options.groupFolder,
+    room_role: options.roomRole,
+    paired_task_id: options.pairedTaskId,
     timestamp: new Date().toISOString(),
   });
 
@@ -125,6 +131,8 @@ export function registerHostEvidenceTools(
         .optional()
         .describe('Only for github_workflow_file; branch, tag, or commit SHA.'),
       artifact_kind: z.enum(ARTIFACT_EVIDENCE_KINDS).optional(),
+      environment: z.enum(REMOTE_REVIEW_ENVIRONMENTS).optional(),
+      check: z.enum(REMOTE_REVIEW_CHECKS).optional(),
     },
     async (args) =>
       requestHostEvidence(options, {
@@ -142,8 +150,27 @@ export function registerHostEvidenceTools(
         workflow_path: args.workflow_path,
         ref: args.ref,
         artifact_kind: args.artifact_kind,
+        environment: args.environment,
+        check: args.check,
       }),
   );
+
+  if (options.roomRole === 'reviewer') {
+    server.tool(
+      'inspect_remote',
+      'Inspect an allowlisted web or server environment through the host read-only broker. URLs, services, log files, config files, SSH credentials, and commands come only from the room reviewAccessProfile; callers cannot provide paths or commands.',
+      {
+        environment: z.enum(REMOTE_REVIEW_ENVIRONMENTS),
+        check: z.enum(REMOTE_REVIEW_CHECKS),
+      },
+      async (args) =>
+        requestHostEvidence(options, {
+          action: 'remote_review_inspect',
+          environment: args.environment,
+          check: args.check,
+        }),
+    );
+  }
 
   server.tool(
     'read_db_evidence',

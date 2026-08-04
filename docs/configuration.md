@@ -77,6 +77,106 @@ ARBITER_FALLBACK_ENABLED=true
 우선순위는 `방 role override > 전역 *_MODEL/*_EFFORT > provider 기본값`입니다.
 tribunal 방은 다음 턴부터 즉시 적용되고, single 방의 owner override는 재시작(또는 `assign_room` 재실행) 후 적용됩니다.
 
+## Reviewer 원격 진단
+
+웹 프로젝트 방에서 Reviewer가 실제 개발·프로덕션 사이트와 서버 상태를
+읽기 전용으로 조사해야 할 때만 활성화합니다. 채널 ID나 서버 주소를 코드에
+하드코딩하지 않습니다.
+
+설정은 세 층으로 분리됩니다.
+
+1. 공통 코드: 고정 진단 동작과 보안 검증
+2. `room_settings.review_access_profile`: 방에 연결된 profile ID
+3. Git 밖의 private JSON: 환경별 URL, SSH profile, 서비스와 허용 경로
+
+main room의 `assign_room`에서 profile을 연결합니다.
+
+```text
+assign_room
+jid: dc:123456789012345678
+room_mode: tribunal
+review_access_profile: my-web-review
+```
+
+CLI setup에서는 다음 옵션을 사용할 수 있습니다.
+
+```bash
+bun run setup -- --step register --review-access-profile my-web-review
+```
+
+빈 문자열 또는 `null`로 지정하면 방 연결이 해제됩니다. profile이 없는 방과
+Owner/Arbiter에는 원격 진단 도구가 활성화되지 않습니다.
+
+private JSON의 기본 경로는
+`~/.server-access/review-access-profiles.json`입니다. 다른 절대경로를 쓰려면
+다음 환경 변수를 지정합니다.
+
+```bash
+REVIEW_ACCESS_PROFILES_FILE=/home/rbclaw/.server-access/review-access-profiles.json
+```
+
+파일 권한은 `600`이어야 하며 예시는 다음과 같습니다.
+
+```json
+{
+  "version": 1,
+  "profiles": {
+    "my-web-review": {
+      "environments": {
+        "production": {
+          "web": {
+            "baseUrl": "https://example.com",
+            "paths": ["/", "/health"],
+            "allowedOrigins": ["https://cdn.example.com"],
+            "allowedPrivateCidrs": []
+          },
+          "remote": {
+            "sshProfile": "example-prod",
+            "allowedRoots": ["/etc/nginx", "/var/log/nginx"],
+            "serviceUnits": ["nginx"],
+            "journalUnits": ["nginx"],
+            "logFiles": [
+              { "id": "nginx-error", "path": "/var/log/nginx/error.log" }
+            ],
+            "configFiles": [
+              { "id": "nginx-main", "path": "/etc/nginx/nginx.conf" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+지원 검사는 다음 5개입니다.
+
+- `inspect_web`: HTTPS GET과 일회성 PC·모바일 Playwright 렌더링으로 status,
+  title, content hash, Console/Page error, 실패한 Network 응답 확인
+- `inspect_service_status`: allowlist systemd unit의 상태 확인
+- `inspect_recent_logs`: allowlist journal/file의 최근 80줄을 PII 제거 후 확인
+- `inspect_config_shape`: 설정 원문 대신 key/directive 구조와 SHA-256만 확인
+- `compare_environments`: development와 production의 설정 구조·hash 비교
+
+보안 경계:
+
+- Reviewer는 SSH 비밀번호·키, 임의 URL·경로·명령을 받거나 제출하지 않습니다.
+- HTTPS, origin/path allowlist, DNS 재검증, private/loopback/metadata IP 차단,
+  redirect·응답 크기·timeout 제한을 적용합니다.
+- `allowedOrigins`는 렌더링에 필요한 CDN origin만 추가합니다. 각 origin도 DNS와
+  private address 검사를 통과하며 main navigation에는 사용할 수 없습니다.
+- private CIDR은 `allowedPrivateCidrs`에 명시된 범위만 예외로 허용합니다.
+- 원격 파일은 절대경로와 `allowedRoots`를 모두 만족해야 하며 symlink의 실제
+  경로도 서버에서 다시 검사합니다.
+- traversal, glob, `.env`, key/pem, credential/secret 경로는 거부합니다.
+- 설정 원문은 host에서 구조/hash로 변환된 뒤 Reviewer에게 전달됩니다.
+- 파일 변경, service restart/reload, 배포·rollback, DB write, POST 요청은
+  지원하지 않습니다.
+- Playwright 검사는 screenshot이나 페이지 본문을 저장하지 않고 종료 시 browser
+  context를 폐기합니다. 외부 origin과 POST 요청은 route 단계에서 차단합니다.
+- 모든 요청은 room, task, role, environment, check, 성공 여부와 함께 host
+  로그에 감사 기록을 남깁니다. 로그 본문과 자격증명은 감사 필드에 넣지 않습니다.
+
 ## 인증
 
 ```bash
