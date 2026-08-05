@@ -57,6 +57,7 @@ export interface AppConfig {
     carryForwardLatestOwnerFinal: boolean;
     forceFreshClaudeReviewerSessionInUnsafeHostMode: boolean;
     agentLanguage: string;
+    arbiterForcePoliteUserTone: boolean;
     arbiterDeadlockThreshold: number;
     maxRoundTrips: number;
     maxEpisodeRoundTrips: number;

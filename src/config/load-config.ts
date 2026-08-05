@@ -280,6 +280,10 @@ export function loadConfig(): AppConfig {
         false,
       ),
       agentLanguage: readText('AGENT_LANGUAGE') ?? '',
+      arbiterForcePoliteUserTone: readBoolean(
+        'ARBITER_FORCE_POLITE_USER_TONE',
+        true,
+      ),
       arbiterDeadlockThreshold: readInteger('ARBITER_DEADLOCK_THRESHOLD', 2),
       maxRoundTrips,
       ...buildPairedSupervisorConfig(rawMaxRoundTrips, maxRoundTrips),

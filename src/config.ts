@@ -92,6 +92,10 @@ export function shouldForceFreshClaudeReviewerSessionInUnsafeHostMode(): boolean
 /** Language for agent responses. When set, a language instruction is appended to all paired room prompts. */
 export const AGENT_LANGUAGE = CONFIG.paired.agentLanguage;
 
+/** Whether the arbiter must address the human user with respectful language. Default: true. */
+export const ARBITER_FORCE_POLITE_USER_TONE =
+  CONFIG.paired.arbiterForcePoliteUserTone;
+
 /** Number of consecutive owner↔reviewer round trips before arbiter is auto-requested. */
 export const ARBITER_DEADLOCK_THRESHOLD =
   CONFIG.paired.arbiterDeadlockThreshold;
