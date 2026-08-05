@@ -1,5 +1,10 @@
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const rbclawRepoDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 
 async function main() {
   const [repoDir, requestJson] = process.argv.slice(2);
@@ -11,7 +16,7 @@ async function main() {
   }
 
   const verificationModuleUrl = pathToFileURL(
-    path.join(repoDir, 'src', 'verification.ts'),
+    path.join(rbclawRepoDir, 'src', 'verification.ts'),
   ).href;
   const verificationModule = await import(verificationModuleUrl);
   const request = JSON.parse(requestJson);

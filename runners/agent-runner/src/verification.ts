@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 export { computeVerificationSnapshotId } from '../../../shared/verification-snapshot.js';
 
 export const VERIFICATION_PROFILES = [
@@ -44,6 +44,10 @@ const VERIFICATION_HELPER_ENV_KEYS: readonly VerificationHelperEnvKey[] = [
 ];
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 const HELPER_MAX_BUFFER = 20 * 1024 * 1024;
+const RBCLAW_REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../..',
+);
 
 export interface VerificationRequest {
   requestId: string;
@@ -127,20 +131,20 @@ function execFileCapture(
 }
 
 export async function runVerificationRequestDirect(
-  repoRoot: string,
+  targetRepoRoot: string,
   request: VerificationRequest,
 ): Promise<VerificationResponse> {
   const helperPath = path.join(
-    repoRoot,
+    RBCLAW_REPO_ROOT,
     'shared',
     'verification-request-runner.js',
   );
   const helperEnv = buildVerificationHelperEnv();
   const { stdout, stderr } = await execFileCapture(
     'bun',
-    [helperPath, repoRoot, JSON.stringify(request)],
+    [helperPath, targetRepoRoot, JSON.stringify(request)],
     {
-      cwd: repoRoot,
+      cwd: targetRepoRoot,
       env: helperEnv,
     },
   );
