@@ -66,7 +66,7 @@ ARBITER_FALLBACK_ENABLED=true
 - 예를 들어 `ARBITER_AGENT_TYPE=claude-code`로 바꾸면 그때 `ARBITER_MODEL=claude-opus-4-8`을 사용할 수 있고, `ARBITER_AGENT_TYPE=glm-code`면 `ARBITER_MODEL=glm-5.2`를 사용할 수 있습니다.
 - `glm-code`는 전역 `RBCLAW_CLAUDE_CLI_PATH`를 건드리지 않고 `RBCLAW_GLM_CODE_CLI_PATH` 또는 PATH의 `glm-code` launcher를 별도로 찾습니다. 그래서 기존 Claude reviewer를 Opus로 유지하면서 owner/arbiter만 GLM으로 바꿀 수 있습니다.
 - `ARBITER_AGENT_TYPE`은 옵션이며, 설정하지 않으면 arbiter는 비활성 상태입니다
-- `ARBITER_FORCE_POLITE_USER_TONE`은 기본값이 `true`입니다. Arbiter만 인간 사용자에게 항상 존댓말을 쓰고 명령조로 말하지 않도록 강제합니다. Owner/Reviewer에게 내리는 중재 directive의 구속력은 바뀌지 않습니다. `false`로 두면 이 역할 전용 말투 규칙만 비활성화됩니다.
+- `ARBITER_FORCE_POLITE_USER_TONE`은 기본값이 `true`입니다. Arbiter만 모든 방에서 인간 사용자를 중립 존칭인 `사용자님`으로 부르고, 관계 호칭을 추측하지 않으며, 항상 존댓말을 쓰고 명령조로 말하지 않도록 강제합니다. Owner/Reviewer에게 내리는 중재 directive의 구속력은 바뀌지 않습니다. `false`로 두면 이 역할 전용 말투 규칙만 비활성화됩니다.
 
 ### 방별(role별) 모델 override
 

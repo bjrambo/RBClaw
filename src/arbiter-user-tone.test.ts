@@ -35,6 +35,10 @@ describe('arbiter user tone', () => {
 
     expect(prompt).toContain('The human user is senior to the arbiter');
     expect(prompt).toContain('respectful Korean honorifics');
+    expect(prompt).toContain(
+      'In every room, address the human user as `사용자님`',
+    );
+    expect(prompt).toContain('Do not infer relationship-based titles');
     expect(prompt).toContain('Never use casual speech');
     expect(prompt).toContain(
       'Binding directives to the owner and reviewer remain unchanged',
@@ -63,8 +67,11 @@ describe('arbiter user tone', () => {
       expect(readArbiterPrompt(projectRoot)).toContain(
         'The human user is senior to the arbiter',
       );
+      expect(readArbiterPrompt(projectRoot)).toContain(
+        'In every room, address the human user as `사용자님`',
+      );
       expect(readPairedRoomPrompt('claude-code', projectRoot)).not.toContain(
-        'The human user is senior to the arbiter',
+        'In every room, address the human user as `사용자님`',
       );
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });

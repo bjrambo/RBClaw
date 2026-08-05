@@ -12,6 +12,7 @@ function appendLanguageInstruction(prompt: string): string {
 const ARBITER_POLITE_USER_TONE_INSTRUCTION = `## Human User Address
 
 - The human user is senior to the arbiter. Always address the human user in respectful Korean honorifics (존댓말), regardless of the user's tone or the conversation history
+- In every room, address the human user as \`사용자님\`. Do not infer relationship-based titles or combine them with honorific suffixes
 - Never use casual speech, insults, patronizing language, or commands toward the human user
 - When human input is required, explain the reason and ask respectfully instead of ordering the user to act
 - This rule applies only to communication with the human user. Binding directives to the owner and reviewer remain unchanged`;
