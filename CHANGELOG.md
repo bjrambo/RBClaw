@@ -4,19 +4,30 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-06
+
 ### Changed
 
 - 프로젝트·패키지·앱·대시보드·서비스 식별자를 `RBClaw`/`rbclaw`로 통일
 - 런타임 환경 변수, IPC 출력 마커, 대시보드 인증 헤더를 `RBCLAW_*` 계약으로 통일
+- Persistent Goal과 bounded Episode를 기준으로 장기 작업, 대기 상태, 재개 흐름을 통합
+- owner / reviewer / arbiter가 동일한 실제 `workDir`를 기준으로 작업하되 reviewer / arbiter는 읽기 전용 mount namespace에서 검증하도록 역할 경계를 확정
 
 ### Added
 
 - 방별(role별) 모델·effort override 지원: `room_role_overrides.agent_config_json`에 저장된 방별 값이 전역 `OWNER_/REVIEWER_/ARBITER_MODEL`보다 우선 적용
 - `assign_room`에 `owner_model`/`owner_effort`/`reviewer_model`/`reviewer_effort`/`arbiter_model`/`arbiter_effort` 파라미터 추가 (빈 문자열로 삭제)
 - 웹 대시보드 설정 → 모델에 "방별 모델" 카드와 `/api/settings/room-models` API 추가
+- 장기 작업의 Goal / Episode 제한, progress fingerprint, waiting / parked 상태를 관리하는 Persistent Supervisor 추가
+- 방별 `review_access_profile`과 host 중재 `inspect_remote` 기반의 읽기 전용 웹·서비스·로그·설정 진단 추가
+- 공개 코드와 개인 owner 페르소나·로컬 규칙을 분리하는 `prompts/CUSTOM.md` 지원
+- arbiter의 사용자 존댓말과 중립 호칭을 모든 방에 적용하는 전역 옵션 추가
+- 초보자 설치, 업데이트, 운영 점검, 원격 진단 보안 경계를 README와 설정 문서에 추가
 
 ### Fixed
 
+- 동일 paired 결과가 Discord에 중복 전달될 수 있던 finalize / delivery 경합 수정
+- 외부 프로젝트의 관리형 검증이 RBClaw 저장소 내부 helper를 대상 `workDir`에서 잘못 찾던 경로 결합 수정
 - 턴 간 컨텍스트 유실 수정: codex 세션을 provider별 키(`:codex`)로 분리해 failover/스케줄 codex 실행이 Claude owner 세션을 덮어쓰거나 지우지 못하게 함 (재배포 시 codex 스레드는 1회 새로 시작)
 - reviewer가 owner와 같은 agent type일 때 owner 세션 키를 공유해 리뷰 사이클마다 owner 컨텍스트를 파괴하던 문제 수정 (reviewer는 항상 `:reviewer` 키)
 - Anthropic 529/네트워크 일시 장애 재시도 시 세션을 무조건 삭제하던 로직을 완화 — 첫 재시도는 세션 유지, 마지막 재시도에서만 삭제

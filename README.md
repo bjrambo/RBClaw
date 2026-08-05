@@ -1,6 +1,6 @@
 # RBClaw
 
-![Version](https://img.shields.io/badge/version-0.2.3-blue)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-0.3.153-blueviolet)
 ![Codex SDK](https://img.shields.io/badge/Codex_SDK-0.144.1-green)
 ![Bun](https://img.shields.io/badge/Bun-1.3+-f9f1e1?logo=bun&logoColor=black)
