@@ -97,6 +97,37 @@ describe('runSpawnedAgentProcess', () => {
     expect(onOutput).toHaveBeenCalledOnce();
   });
 
+  it('resolves streamed runs on exit when descendant pipes keep close open', async () => {
+    logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));
+    const proc = buildProcess();
+    const onOutput = vi.fn<(_: AgentOutput) => Promise<void>>(async () => {});
+
+    const resultPromise = runSpawnedAgentProcess({
+      proc,
+      group,
+      input,
+      processName: 'test-agent',
+      logsDir,
+      startTime: Date.now(),
+      onOutput,
+    });
+
+    (proc.stdout as PassThrough).write(
+      [
+        OUTPUT_START_MARKER,
+        JSON.stringify({ status: 'success', result: 'done' }),
+        OUTPUT_END_MARKER,
+      ].join('\n'),
+    );
+    proc.emit('exit', null, 'SIGKILL');
+
+    await expect(timed(resultPromise)).resolves.toMatchObject({
+      status: 'success',
+      result: null,
+    });
+    expect(onOutput).toHaveBeenCalledOnce();
+  });
+
   it('enforces hard wall-clock timeout even while activity resets idle timeout', async () => {
     vi.useFakeTimers();
     logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));

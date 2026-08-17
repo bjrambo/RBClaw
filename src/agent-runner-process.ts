@@ -12,6 +12,7 @@ import {
 import { logger } from './logger.js';
 import { OUTPUT_END_MARKER, OUTPUT_START_MARKER } from './agent-protocol.js';
 import type { AgentInput, AgentOutput } from './agent-runner.js';
+import { signalProcessTree } from './process-tree.js';
 import type { RegisteredGroup } from './types.js';
 import { getErrorMessage } from './utils.js';
 
@@ -586,9 +587,9 @@ export function runSpawnedAgentProcess(
           ? 'Agent hard turn timeout, sending SIGTERM'
           : 'Agent activity timeout, sending SIGTERM',
       );
-      proc.kill('SIGTERM');
+      signalProcessTree(proc, 'SIGTERM');
       killTimer = setTimeout(() => {
-        if (!closed) proc.kill('SIGKILL');
+        if (!closed) signalProcessTree(proc, 'SIGKILL');
       }, terminationGraceMs);
     };
 
@@ -634,7 +635,11 @@ export function runSpawnedAgentProcess(
       });
     });
 
-    proc.on('close', (code, signal) => {
+    const finishProcess = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ) => {
+      if (closed) return;
       closed = true;
       clearTimeout(timeout);
       clearTimeout(hardTimeout);
@@ -648,6 +653,13 @@ export function runSpawnedAgentProcess(
         code,
         signal,
       });
+    };
+
+    proc.on('close', finishProcess);
+    proc.on('exit', (code, signal) => {
+      if (onOutput && state.hadStreamingOutput) {
+        finishProcess(code, signal);
+      }
     });
 
     proc.on('error', (err) => {

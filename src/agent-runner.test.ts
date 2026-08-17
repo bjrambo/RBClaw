@@ -480,6 +480,7 @@ describe('agent-runner environment wiring', () => {
       ]),
       expect.objectContaining({
         cwd: expect.stringContaining('/runners/agent-runner'),
+        detached: process.platform !== 'win32',
       }),
     );
     expect(prepareReadonlySessionEnvironmentSpy).toHaveBeenCalledWith(

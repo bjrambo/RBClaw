@@ -329,6 +329,7 @@ export async function runAgentProcess(
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: runnerDir,
       env,
+      detached: process.platform !== 'win32',
     });
 
     onProcess(proc, processName, env[RBCLAW_ENV.ipcDir]);

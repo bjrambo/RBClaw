@@ -6,6 +6,7 @@ import {
   waitForProcessExit,
 } from './group-queue-process.js';
 import { logger } from './logger.js';
+import { signalProcessTree } from './process-tree.js';
 import type { GroupState } from './group-queue-state.js';
 
 export async function shutdownGroupProcesses(
@@ -86,7 +87,7 @@ export async function shutdownGroupProcesses(
 
   for (const { process } of stillRunning) {
     try {
-      process.kill('SIGTERM');
+      signalProcessTree(process, 'SIGTERM');
     } catch (err) {
       logger.warn({ err }, 'Failed to SIGTERM lingering agent process');
     }
@@ -114,7 +115,7 @@ export async function shutdownGroupProcesses(
 
   for (const { process } of stubborn) {
     try {
-      process.kill('SIGKILL');
+      signalProcessTree(process, 'SIGKILL');
     } catch (err) {
       logger.warn({ err }, 'Failed to SIGKILL stubborn agent process');
     }

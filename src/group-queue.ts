@@ -28,6 +28,7 @@ import {
   transitionRunPhase,
 } from './group-queue-state.js';
 import { logger } from './logger.js';
+import { signalProcessTree } from './process-tree.js';
 import type { ActiveMessageRunInputClaim } from './group-queue-run-input.js';
 import type {
   GroupRunContext,
@@ -431,11 +432,11 @@ export class GroupQueue {
     try {
       // SIGTERM allows the runner to call AbortController.abort() for graceful cleanup.
       // Falls back to SIGKILL after 5 seconds if the process doesn't exit.
-      proc.kill('SIGTERM');
+      signalProcessTree(proc, 'SIGTERM');
       setTimeout(() => {
         if (isProcessAlive(proc)) {
           try {
-            proc.kill('SIGKILL');
+            signalProcessTree(proc, 'SIGKILL');
           } catch {
             /* already dead */
           }

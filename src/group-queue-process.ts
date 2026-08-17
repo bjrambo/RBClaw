@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'child_process';
 
 import { logger } from './logger.js';
+import { signalProcessTree } from './process-tree.js';
 import type { GroupState } from './group-queue-state.js';
 
 const POST_CLOSE_SIGTERM_DELAY_MS = 60_000;
@@ -75,7 +76,7 @@ export function schedulePostCloseTermination(
     );
 
     try {
-      proc.kill('SIGTERM');
+      signalProcessTree(proc, 'SIGTERM');
     } catch (err) {
       logger.warn(
         { groupJid, runId, processName, err },
@@ -102,7 +103,7 @@ export function schedulePostCloseTermination(
     );
 
     try {
-      proc.kill('SIGKILL');
+      signalProcessTree(proc, 'SIGKILL');
     } catch (err) {
       logger.warn(
         { groupJid, runId, processName, err },
