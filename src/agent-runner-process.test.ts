@@ -128,6 +128,77 @@ describe('runSpawnedAgentProcess', () => {
     expect(onOutput).toHaveBeenCalledOnce();
   });
 
+  it('does not treat intermediate streamed output as terminal cleanup', async () => {
+    vi.useFakeTimers();
+    logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));
+    const proc = buildProcess();
+    const resultPromise = runSpawnedAgentProcess({
+      proc,
+      group,
+      input,
+      processName: 'test-agent',
+      logsDir,
+      startTime: Date.now(),
+      onOutput: vi.fn(async () => undefined),
+      postTerminalExitTimeoutMs: 10,
+    });
+
+    (proc.stdout as PassThrough).write(
+      [
+        OUTPUT_START_MARKER,
+        JSON.stringify({
+          status: 'success',
+          phase: 'intermediate',
+          result: 'still working',
+        }),
+        OUTPUT_END_MARKER,
+      ].join('\n'),
+    );
+    await vi.advanceTimersByTimeAsync(30);
+
+    expect(proc.kill).not.toHaveBeenCalled();
+    proc.emit('close', 0, null);
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+    vi.useRealTimers();
+  });
+
+  it('releases a completed streamed run when the process emits no exit event', async () => {
+    vi.useFakeTimers();
+    logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));
+    const proc = buildProcess();
+    const onOutput = vi.fn<(_: AgentOutput) => Promise<void>>(async () => {});
+    const resultPromise = runSpawnedAgentProcess({
+      proc,
+      group,
+      input,
+      processName: 'test-agent',
+      logsDir,
+      startTime: Date.now(),
+      onOutput,
+      postTerminalExitTimeoutMs: 10,
+    });
+
+    (proc.stdout as PassThrough).write(
+      [
+        OUTPUT_START_MARKER,
+        JSON.stringify({ status: 'success', result: 'done' }),
+        OUTPUT_END_MARKER,
+      ].join('\n'),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    expect(proc.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(proc.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'success',
+      result: null,
+    });
+    expect(onOutput).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it('enforces hard wall-clock timeout even while activity resets idle timeout', async () => {
     vi.useFakeTimers();
     logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rbclaw-agent-runner-'));

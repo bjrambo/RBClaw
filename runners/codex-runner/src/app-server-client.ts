@@ -1,4 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import {
+  spawn,
+  type ChildProcess,
+  type ChildProcessWithoutNullStreams,
+} from 'child_process';
 import { createRequire } from 'module';
 import path from 'path';
 
@@ -129,6 +133,39 @@ export interface CodexAppServerClientOptions {
   enableGoals?: boolean;
 }
 
+export async function closeAppServerProcess(
+  proc: ChildProcess,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      proc.off('close', finish);
+      proc.off('exit', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+
+    proc.once('close', finish);
+    proc.once('exit', finish);
+    try {
+      proc.stdin?.end();
+    } catch {
+      /* already closed */
+    }
+    try {
+      proc.kill('SIGTERM');
+    } catch {
+      finish();
+    }
+  });
+}
+
 export class CodexAppServerClient {
   private readonly cwd: string;
   private readonly env: NodeJS.ProcessEnv;
@@ -227,11 +264,7 @@ export class CodexAppServerClient {
     if (!this.proc) return;
     const proc = this.proc;
     this.proc = null;
-    try {
-      proc.kill('SIGTERM');
-    } catch {
-      /* ignore */
-    }
+    await closeAppServerProcess(proc);
   }
 
   async startOrResumeThread(

@@ -28,6 +28,7 @@ interface RunSpawnedAgentProcessArgs {
   activityTimeoutMs?: number;
   hardTurnTimeoutMs?: number;
   terminationGraceMs?: number;
+  postTerminalExitTimeoutMs?: number;
 }
 
 interface AgentProcessStreamState {
@@ -54,8 +55,13 @@ interface ProcessCloseContext {
   signal: NodeJS.Signals | null;
 }
 
+interface PostTerminalCleanup {
+  schedule(output: AgentOutput): void;
+  clear(): void;
+}
+
 function isTerminalStreamedOutput(output: AgentOutput): boolean {
-  return (output.phase ?? 'final') !== 'progress';
+  return (output.phase ?? 'final') === 'final';
 }
 
 function parseLegacyAgentOutput(stdout: string): AgentOutput {
@@ -125,6 +131,84 @@ function chainStreamedOutputDelivery(args: {
       logStreamedOutputDeliveryError(err, args.group, args.input);
     }
   });
+}
+
+function createPostTerminalCleanup(args: {
+  proc: ChildProcess;
+  group: RegisteredGroup;
+  input: AgentInput;
+  processName: string;
+  timeoutMs: number;
+  isClosed: () => boolean;
+  onTerminalFlushed?: (output: AgentOutput) => void;
+  onForceResolve: () => void;
+}): PostTerminalCleanup {
+  let termTimer: ReturnType<typeof setTimeout> | null = null;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveTimer: ReturnType<typeof setTimeout> | null = null;
+  let scheduled = false;
+
+  const clear = () => {
+    if (termTimer) clearTimeout(termTimer);
+    if (killTimer) clearTimeout(killTimer);
+    if (resolveTimer) clearTimeout(resolveTimer);
+  };
+
+  const schedule = (output: AgentOutput) => {
+    args.onTerminalFlushed?.(output);
+    if (args.isClosed() || scheduled) return;
+    scheduled = true;
+
+    termTimer = setTimeout(() => {
+      termTimer = null;
+      if (args.isClosed()) return;
+      logger.warn(
+        {
+          group: args.group.name,
+          chatJid: args.input.chatJid,
+          runId: args.input.runId,
+          processName: args.processName,
+          delayMs: args.timeoutMs,
+        },
+        'Agent process remained alive after terminal output, sending SIGTERM',
+      );
+      signalProcessTree(args.proc, 'SIGTERM');
+    }, args.timeoutMs);
+
+    killTimer = setTimeout(() => {
+      killTimer = null;
+      if (args.isClosed()) return;
+      logger.error(
+        {
+          group: args.group.name,
+          chatJid: args.input.chatJid,
+          runId: args.input.runId,
+          processName: args.processName,
+          delayMs: args.timeoutMs * 2,
+        },
+        'Agent process ignored terminal cleanup SIGTERM, sending SIGKILL',
+      );
+      signalProcessTree(args.proc, 'SIGKILL');
+    }, args.timeoutMs * 2);
+
+    resolveTimer = setTimeout(() => {
+      resolveTimer = null;
+      if (args.isClosed()) return;
+      logger.error(
+        {
+          group: args.group.name,
+          chatJid: args.input.chatJid,
+          runId: args.input.runId,
+          processName: args.processName,
+          delayMs: args.timeoutMs * 3,
+        },
+        'Agent process emitted no exit event after SIGKILL; releasing completed run',
+      );
+      args.onForceResolve();
+    }, args.timeoutMs * 3);
+  };
+
+  return { schedule, clear };
 }
 
 function writeTimeoutLog(args: {
@@ -568,8 +652,10 @@ export function runSpawnedAgentProcess(
       args.activityTimeoutMs ?? Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
     const hardTurnTimeoutMs = args.hardTurnTimeoutMs ?? HARD_TURN_TIMEOUT;
     const terminationGraceMs = args.terminationGraceMs ?? 15_000;
+    const postTerminalExitTimeoutMs = args.postTerminalExitTimeoutMs ?? 5_000;
     let closed = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
+    let postTerminalCleanup: PostTerminalCleanup | null = null;
 
     const killOnTimeout = (kind: 'activity' | 'hard') => {
       if (closed || state.timedOut) return;
@@ -605,6 +691,42 @@ export function runSpawnedAgentProcess(
       timeout = setTimeout(() => killOnTimeout('activity'), timeoutMs);
     };
 
+    const clearProcessTimers = () => {
+      clearTimeout(timeout);
+      clearTimeout(hardTimeout);
+      if (killTimer) clearTimeout(killTimer);
+      postTerminalCleanup?.clear();
+    };
+
+    const finishProcess = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ) => {
+      if (closed) return;
+      closed = true;
+      clearProcessTimers();
+      handleProcessClose({
+        args,
+        state,
+        resolve,
+        configTimeout,
+        duration: Date.now() - startTime,
+        code,
+        signal,
+      });
+    };
+
+    postTerminalCleanup = createPostTerminalCleanup({
+      proc,
+      group,
+      input,
+      processName,
+      timeoutMs: postTerminalExitTimeoutMs,
+      isClosed: () => closed,
+      onTerminalFlushed: args.onTerminalStreamedOutputFlushed,
+      onForceResolve: () => finishProcess(null, 'SIGKILL'),
+    });
+
     stdoutStream.on('data', (data) => {
       const chunk = data.toString();
 
@@ -618,7 +740,7 @@ export function runSpawnedAgentProcess(
       consumeStreamedOutputMarkers({
         state,
         onOutput,
-        onTerminalStreamedOutputFlushed: args.onTerminalStreamedOutputFlushed,
+        onTerminalStreamedOutputFlushed: postTerminalCleanup.schedule,
         group,
         input,
         resetTimeout,
@@ -635,26 +757,6 @@ export function runSpawnedAgentProcess(
       });
     });
 
-    const finishProcess = (
-      code: number | null,
-      signal: NodeJS.Signals | null,
-    ) => {
-      if (closed) return;
-      closed = true;
-      clearTimeout(timeout);
-      clearTimeout(hardTimeout);
-      if (killTimer) clearTimeout(killTimer);
-      handleProcessClose({
-        args,
-        state,
-        resolve,
-        configTimeout,
-        duration: Date.now() - startTime,
-        code,
-        signal,
-      });
-    };
-
     proc.on('close', finishProcess);
     proc.on('exit', (code, signal) => {
       if (onOutput && state.hadStreamingOutput) {
@@ -664,9 +766,7 @@ export function runSpawnedAgentProcess(
 
     proc.on('error', (err) => {
       closed = true;
-      clearTimeout(timeout);
-      clearTimeout(hardTimeout);
-      if (killTimer) clearTimeout(killTimer);
+      clearProcessTimers();
       logger.error(
         {
           group: group.name,
