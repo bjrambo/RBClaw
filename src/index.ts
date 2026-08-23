@@ -72,6 +72,7 @@ import {
   resolveInjectedMessageSourceKind,
 } from './message-source.js';
 import { parseVisibleVerdict } from './paired-verdict.js';
+import { connectChannelWithRetry } from './channel-connect-retry.js';
 
 export function isTerminalStatusMessage(text: string): boolean {
   return parseVisibleVerdict(text) !== 'continue';
@@ -428,12 +429,31 @@ async function connectRegisteredChannels(): Promise<void> {
       continue;
     }
     try {
-      await channel.connect();
+      const attempts = await connectChannelWithRetry(channel, {
+        onRetry: ({ attempt, maxAttempts, retryDelayMs, error }) => {
+          logger.warn(
+            {
+              channel: channelName,
+              attempt,
+              maxAttempts,
+              retryDelayMs,
+              err: error,
+            },
+            'Channel connect failed — retrying',
+          );
+        },
+      });
       channels.push(channel);
+      if (attempts > 1) {
+        logger.info(
+          { channel: channelName, attempts },
+          'Channel connected after retry',
+        );
+      }
     } catch (err) {
       logger.error(
         { channel: channelName, err },
-        'Channel connect failed — skipping',
+        'Channel connect failed after retries — skipping',
       );
     }
   }
