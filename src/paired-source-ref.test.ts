@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   hasCodeChangesSinceRef,
   resolveCanonicalSourceRef,
+  resolveLegacyWorkDirFingerprint,
 } from './paired-source-ref.js';
 
 describe('direct work directory source references', () => {
@@ -61,7 +62,7 @@ describe('direct work directory source references', () => {
     const workDir = createRepository();
     const sourceRef = resolveCanonicalSourceRef(workDir);
 
-    expect(sourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    expect(sourceRef).toMatch(/^workdir-v2:[a-f0-9]{64}$/);
     expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(false);
 
     fs.writeFileSync(path.join(workDir, 'tracked.txt'), 'changed\n');
@@ -70,6 +71,32 @@ describe('direct work directory source references', () => {
     execFileSync('git', ['checkout', '--', 'tracked.txt'], { cwd: workDir });
     fs.writeFileSync(path.join(workDir, 'untracked.txt'), 'new\n');
     expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(true);
+  });
+
+  it('keeps the reviewed fingerprint when the same content is committed', () => {
+    const workDir = createRepository();
+    fs.writeFileSync(path.join(workDir, 'tracked.txt'), 'reviewed change\n');
+    execFileSync('git', ['add', 'tracked.txt'], { cwd: workDir });
+    const reviewedSourceRef = resolveCanonicalSourceRef(workDir);
+
+    execFileSync('git', ['commit', '--quiet', '-m', 'Commit reviewed change'], {
+      cwd: workDir,
+    });
+
+    expect(resolveCanonicalSourceRef(workDir)).toBe(reviewedSourceRef);
+    expect(hasCodeChangesSinceRef(workDir, reviewedSourceRef)).toBe(false);
+  });
+
+  it('continues to compare legacy work directory fingerprints', () => {
+    const workDir = createRepository();
+    fs.writeFileSync(path.join(workDir, 'untracked.txt'), 'legacy content\n');
+    const legacySourceRef = resolveLegacyWorkDirFingerprint(workDir);
+
+    expect(legacySourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    expect(hasCodeChangesSinceRef(workDir, legacySourceRef)).toBe(false);
+
+    fs.writeFileSync(path.join(workDir, 'untracked.txt'), 'changed\n');
+    expect(hasCodeChangesSinceRef(workDir, legacySourceRef)).toBe(true);
   });
 
   it('falls back safely outside a Git repository', () => {
@@ -87,7 +114,7 @@ describe('direct work directory source references', () => {
     const nestedDir = createNestedRepository(workDir);
     const sourceRef = resolveCanonicalSourceRef(workDir);
 
-    expect(sourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    expect(sourceRef).toMatch(/^workdir-v2:[a-f0-9]{64}$/);
     expect(hasCodeChangesSinceRef(workDir, sourceRef)).toBe(false);
 
     fs.writeFileSync(path.join(nestedDir, 'nested.txt'), 'changed\n');

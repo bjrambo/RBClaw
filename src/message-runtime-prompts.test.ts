@@ -513,8 +513,23 @@ describe('message-runtime-prompts prompt hygiene', () => {
           'reviewer',
         ),
       ],
+      recentHumanMessages: [
+        makeHumanMessage(
+          '수정하고 커밋·푸시·배포·재시작까지 진행',
+          '2026-04-20T01:00:00.000Z',
+        ),
+      ],
+      taskCreatedAt: '2026-04-20T00:58:00.000Z',
     });
 
+    expect(prompt).toContain('Current task-scoped human instructions:');
+    expect(prompt).toContain('수정하고 커밋·푸시·배포·재시작까지 진행');
+    expect(prompt).toContain(
+      'do not ask the user or reviewer to approve the same action again',
+    );
+    expect(prompt).toContain(
+      'Complete every remaining action in those instructions before reporting final completion.',
+    );
     expect(prompt).not.toContain("Reviewer's final assessment:");
     expect(prompt).not.toContain('현재 검증:');
     expect(prompt).not.toContain('build pass');

@@ -146,6 +146,16 @@ describe('platform-prompts', () => {
       'every local path that the owner reports touching',
     );
     expect(reviewerPrompt).toContain('Keep all verification read-only');
+    expect(ownerPrompt).toContain(
+      'do not ask the user or reviewer to approve the same action again',
+    );
+    expect(ownerPrompt).toContain(
+      'reviewer **TASK_DONE** or **DONE** is sufficient correctness approval',
+    );
+    expect(reviewerPrompt).toContain('Do not require a second user approval');
+    expect(reviewerPrompt).toContain(
+      'do not ask the user to repeat that approval',
+    );
     expect(arbiterPrompt).toContain(
       'every external local path the owner reports touching',
     );

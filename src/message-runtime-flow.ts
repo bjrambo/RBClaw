@@ -199,7 +199,13 @@ export function buildPendingPairedTurn(args: {
 
   if (effectiveNextTurnAction.kind === 'finalize-owner-turn') {
     return {
-      prompt: buildFinalizePendingPrompt({ turnOutputs }),
+      prompt: buildFinalizePendingPrompt({
+        turnOutputs,
+        recentHumanMessages: taskContextMessages.filter(
+          (message) => !message.is_bot_message,
+        ),
+        taskCreatedAt: task.created_at,
+      }),
       channel: resolveChannel(taskStatus),
       cursor,
       taskId: task.id,
@@ -492,6 +498,11 @@ export async function executeBotOnlyPairedFollowUpAction(args: {
       group,
       prompt: buildFinalizePendingPrompt({
         turnOutputs: getPairedTurnOutputs(action.task.id),
+        recentHumanMessages: getTaskContextMessages(
+          chatJid,
+          action.task,
+        ).filter((message) => !message.is_bot_message),
+        taskCreatedAt: action.task.created_at,
       }),
       chatJid,
       runId,

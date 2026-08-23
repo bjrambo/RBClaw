@@ -299,12 +299,29 @@ export function buildArbiterPromptForTask(args: {
   });
 }
 
-export function buildFinalizePendingPrompt(_args: {
+export function buildFinalizePendingPrompt(args: {
   turnOutputs: PairedTurnOutput[];
+  recentHumanMessages: NewMessage[];
+  taskCreatedAt?: string | null;
 }): string {
-  return `The reviewer approved the current task scope (TASK_DONE / legacy DONE). Finalize and report the result.
-If you intend to close this paired turn now, your first line must be TASK_DONE.
-Do not use STEP_DONE only because a broader roadmap still has remaining work; close the approved slice and continue the next slice in a new owner turn.
-Use STEP_DONE only when this same approved scope still needs additional owner changes and another review pass.
-If your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.`;
+  const taskInstructions = currentTaskHumanMessages(
+    args.recentHumanMessages,
+    args.taskCreatedAt,
+  )
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  const instructionContext =
+    taskInstructions.length > 0
+      ? taskInstructions.map((instruction) => `- ${instruction}`).join('\n')
+      : '- No task-scoped human instruction was recovered. Finalize only the reviewed scope.';
+
+  return `The reviewer approved the current code scope (TASK_DONE / legacy DONE).
+
+Current task-scoped human instructions:
+${instructionContext}
+
+Complete every remaining action in those instructions before reporting final completion. Explicit non-voice user authorization for commit, push, deploy, restart, SSH, or other high-risk work remains valid for this task: perform the required preflight, but do not ask the user or reviewer to approve the same action again.
+If all requested and authorized actions are complete and verified, your first line must be TASK_DONE.
+Use STEP_DONE only when this same task still has owner work remaining; continue it directly instead of closing the task or waiting for a new user turn.
+If code changes are made after this approval, request another review pass. If your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.`;
 }

@@ -666,7 +666,7 @@ describe('paired execution context owner completion handling', () => {
     createNestedRepoWithCommit(repoDir);
     const approvedSourceRef = resolveTreeRef(repoDir);
 
-    expect(approvedSourceRef).toMatch(/^workdir-v1:[a-f0-9]{64}$/);
+    expect(approvedSourceRef).toMatch(/^workdir-v2:[a-f0-9]{64}$/);
     vi.mocked(db.getPairedTaskById).mockReturnValue(
       buildPairedTask({
         status: 'merge_ready',

@@ -3,7 +3,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-const WORK_DIR_FINGERPRINT_PREFIX = 'workdir-v1:';
+const WORK_DIR_FINGERPRINT_V1_PREFIX = 'workdir-v1:';
+const WORK_DIR_FINGERPRINT_PREFIX = 'workdir-v2:';
 
 export function resolveCanonicalSourceRef(workDir: string): string {
   const fingerprint = resolveWorkDirFingerprint(workDir);
@@ -11,6 +12,36 @@ export function resolveCanonicalSourceRef(workDir: string): string {
 }
 
 function resolveWorkDirFingerprint(workDir: string): string | null {
+  try {
+    const workTreePaths = execFileSync(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+      {
+        cwd: workDir,
+        encoding: null,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    )
+      .toString('utf-8')
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+
+    const hash = crypto.createHash('sha256');
+    hash.update('worktree-content-v2\0');
+    for (const relativePath of workTreePaths) {
+      updateHashForPath(hash, workDir, relativePath);
+    }
+    return `${WORK_DIR_FINGERPRINT_PREFIX}${hash.digest('hex')}`;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveLegacyWorkDirFingerprint(
+  workDir: string,
+): string | null {
   try {
     const treeHash = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
       cwd: workDir,
@@ -27,7 +58,7 @@ function resolveWorkDirFingerprint(workDir: string): string | null {
         maxBuffer: 64 * 1024 * 1024,
       },
     );
-    const untrackedOutput = execFileSync(
+    const untrackedPaths = execFileSync(
       'git',
       ['ls-files', '--others', '--exclude-standard', '-z'],
       {
@@ -36,8 +67,7 @@ function resolveWorkDirFingerprint(workDir: string): string | null {
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 16 * 1024 * 1024,
       },
-    );
-    const untrackedPaths = untrackedOutput
+    )
       .toString('utf-8')
       .split('\0')
       .filter(Boolean)
@@ -48,15 +78,15 @@ function resolveWorkDirFingerprint(workDir: string): string | null {
     hash.update(trackedDiff);
     hash.update('\0untracked\0');
     for (const relativePath of untrackedPaths) {
-      updateHashForPath(hash, workDir, relativePath);
+      updateLegacyHashForPath(hash, workDir, relativePath);
     }
-    return `${WORK_DIR_FINGERPRINT_PREFIX}${hash.digest('hex')}`;
+    return `${WORK_DIR_FINGERPRINT_V1_PREFIX}${hash.digest('hex')}`;
   } catch {
     return null;
   }
 }
 
-function updateHashForPath(
+function updateLegacyHashForPath(
   hash: crypto.Hash,
   rootDir: string,
   relativePath: string,
@@ -69,6 +99,47 @@ function updateHashForPath(
   if (stat.isSymbolicLink()) {
     hash.update(fs.readlinkSync(filePath));
   } else if (stat.isFile()) {
+    hash.update(fs.readFileSync(filePath));
+  } else if (stat.isDirectory()) {
+    const nestedFingerprint = isGitRepositoryRoot(filePath)
+      ? resolveLegacyWorkDirFingerprint(filePath)
+      : null;
+    if (nestedFingerprint) {
+      hash.update(`git-directory\0${nestedFingerprint}`);
+    } else {
+      hash.update('directory\0');
+      for (const entry of fs.readdirSync(filePath).sort()) {
+        if (entry === '.git') continue;
+        updateLegacyHashForPath(hash, rootDir, path.join(relativePath, entry));
+      }
+    }
+  } else {
+    hash.update(`other\0${stat.mode}\0${stat.size}`);
+  }
+
+  hash.update('\0');
+}
+
+function updateHashForPath(
+  hash: crypto.Hash,
+  rootDir: string,
+  relativePath: string,
+): void {
+  const filePath = path.join(rootDir, relativePath);
+  hash.update(relativePath);
+  hash.update('\0');
+  if (!fs.existsSync(filePath)) {
+    hash.update('missing\0');
+    return;
+  }
+
+  const stat = fs.lstatSync(filePath);
+
+  if (stat.isSymbolicLink()) {
+    hash.update('symlink\0');
+    hash.update(fs.readlinkSync(filePath));
+  } else if (stat.isFile()) {
+    hash.update(`file\0${stat.mode & 0o111}\0`);
     hash.update(fs.readFileSync(filePath));
   } else if (stat.isDirectory()) {
     const nestedFingerprint = isGitRepositoryRoot(filePath)
@@ -110,6 +181,10 @@ export function hasCodeChangesSinceRef(
   if (!sourceRef) return null;
   if (sourceRef.startsWith(WORK_DIR_FINGERPRINT_PREFIX)) {
     const current = resolveWorkDirFingerprint(workDir);
+    return current ? current !== sourceRef : null;
+  }
+  if (sourceRef.startsWith(WORK_DIR_FINGERPRINT_V1_PREFIX)) {
+    const current = resolveLegacyWorkDirFingerprint(workDir);
     return current ? current !== sourceRef : null;
   }
   try {

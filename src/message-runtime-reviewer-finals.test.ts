@@ -506,12 +506,14 @@ describe('createMessageRuntime finalize prompts', () => {
     ]);
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, input, _onProcess, onOutput) => {
-        expect(input.prompt).toBe(
-          'The reviewer approved the current task scope (TASK_DONE / legacy DONE). Finalize and report the result.\n' +
-            'If you intend to close this paired turn now, your first line must be TASK_DONE.\n' +
-            'Do not use STEP_DONE only because a broader roadmap still has remaining work; close the approved slice and continue the next slice in a new owner turn.\n' +
-            'Use STEP_DONE only when this same approved scope still needs additional owner changes and another review pass.\n' +
-            'If your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.',
+        expect(input.prompt).toContain(
+          'The reviewer approved the current code scope',
+        );
+        expect(input.prompt).toContain(
+          'Complete every remaining action in those instructions before reporting final completion.',
+        );
+        expect(input.prompt).toContain(
+          'do not ask the user or reviewer to approve the same action again',
         );
         expect(input.prompt).not.toContain("Reviewer's final assessment:");
         expect(input.prompt).not.toContain(longReviewerOutput);
@@ -619,8 +621,11 @@ describe('createMessageRuntime finalize prompts', () => {
     ]);
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, input, _onProcess, onOutput) => {
-        expect(input.prompt).toBe(
-          'The reviewer approved the current task scope (TASK_DONE / legacy DONE). Finalize and report the result.\nIf you intend to close this paired turn now, your first line must be TASK_DONE.\nDo not use STEP_DONE only because a broader roadmap still has remaining work; close the approved slice and continue the next slice in a new owner turn.\nUse STEP_DONE only when this same approved scope still needs additional owner changes and another review pass.\nIf your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.',
+        expect(input.prompt).toContain(
+          'The reviewer approved the current code scope',
+        );
+        expect(input.prompt).toContain(
+          'Complete every remaining action in those instructions before reporting final completion.',
         );
         expect(input.prompt).not.toContain('리뷰 승인 요약');
         expect(input.prompt).not.toContain('DONE\n승인합니다.');
