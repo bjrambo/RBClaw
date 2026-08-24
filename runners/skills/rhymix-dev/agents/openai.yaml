@@ -1,0 +1,7 @@
+interface:
+  display_name: "Rhymix Development"
+  short_description: "라이믹스 코어·확장 개발과 검증"
+  default_prompt: "Use $rhymix-dev to inspect this Rhymix codebase and implement the requested change using verified APIs."
+
+policy:
+  allow_implicit_invocation: true

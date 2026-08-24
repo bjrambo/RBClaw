@@ -1,19 +1,64 @@
 ---
 name: rhymix-dev
-description: Rhymix CMS extension development guide for modules, addons, layouts, widgets, and skins. Validates and generates code following official documentation. TRIGGER when user mentions Rhymix, XE, or works on Rhymix extension code.
+description: Develop, review, debug, and explain Rhymix or XE code, including core request lifecycle, framework and legacy APIs, modules, addons, layouts, skins, widgets, editor components, database queries, templates, security, authentication, cache, queues, storage, CLI, testing, and deployment. Use whenever the user mentions Rhymix, 라이믹스, XE, or works in a Rhymix codebase.
 ---
 
-# Rhymix CMS Extension Development Skill
+# Rhymix Development Skill
 
-You are a Rhymix CMS extension development expert. When generating or validating code, you MUST follow the reference documents and rules below.
+Use this skill for both extension development and Rhymix core investigation. Ground every technical claim in the target checkout or the bundled references; never invent APIs.
+
+## Required Workflow
+
+1. Read the target project's `AGENTS.md`, `CLAUDE.md`, and local conventions first.
+2. Inspect the actual target files before proposing or changing code.
+3. Read [the bundled LLM entry guide](references/rx-docs/llms.txt), then load only the task-specific documents listed below.
+4. Search the bundled corpus with `rg -n` before assuming an API, class, XML attribute, hook, or template directive exists.
+5. Verify important behavior against the installed Rhymix source matching the target deployment. The source checkout wins over documentation when versions differ.
+6. Run the narrowest relevant validation first, then broaden it according to risk.
+
+Use this evidence priority:
+
+1. Target project rules and its installed Rhymix source.
+2. Current official Rhymix manual and coding standards.
+3. Bundled `rx-docs` snapshot, which is source-derived but not official documentation.
+4. The concise local reference files in this skill.
+
+When reporting findings, cite concrete `file_path:line_number` locations. If the installed version is unknown, say so and avoid version-sensitive certainty.
 
 ## Reference Documents
 
-- [Module Development](reference-module.md) — directory structure, info.xml, module.xml, class patterns, router
-- [Database](reference-database.md) — schema XML, query XML, operations, ruleset
-- [Templates](reference-template.md) — v1/v2 syntax, directives, filters, includes, resource loading
-- [Addon/Layout/Widget](reference-addon-layout-widget.md) — structure and patterns for each type
-- [API & Coding Standards](reference-api-conventions.md) — coding standards, API functions, language files
+### Full Rhymix Codebase Corpus
+
+The complete `zodkr/rx-docs` documentation snapshot is bundled under `references/rx-docs/` at commit `98e763d782c4861c69e8c807a35031e30c46f396`.
+
+- Start with [llms.txt](references/rx-docs/llms.txt) for architecture, conventions, and the full index.
+- Use [README.md](references/rx-docs/README.md) for the human-oriented corpus map.
+- Core lifecycle: `01-overview.md`, `04-bootstrap-and-request-lifecycle.md`, `05-context.md`, `06-module-handler-lifecycle.md`, `08-display-and-response.md`.
+- Framework and loading: `07-router.md`, `10-framework.md`, `11-legacy-classes.md`, `12-helpers-and-globals.md`, `26-namespaces-and-autoload.md`.
+- Data and security: `14-database-and-queries.md`, `15-session-and-auth.md`, `17-cache-and-queue.md`, `19-security.md`, `20-storage-and-files.md`.
+- Templates and themes: `09-templates-and-skins.md`, `16-i18n-and-lang.md`, and the relevant file under `27-extension-points/`.
+- Extension development: use the matching file under `27-extension-points/` for modules, addons, layouts, module skins, widgets, widgetstyles, or editor components.
+- Existing core behavior: inspect `28-modules/<name>.md`, `29-addons/`, `30-widgets/`, `31-widgetstyles/`, `32-layouts/`, or `33-editor-components/`.
+- Operations: `02-infrastructure.md`, `21-cli-and-scripts.md`, `22-multi-site-and-domain.md`, `24-debug-and-logging.md`, `25-config-system.md`, `35-testing-and-ci.md`.
+- Integrations: `18-mail-sms-push.md`, `23-mobile-detection.md`, `34-external-libraries.md`.
+
+Do not load the entire corpus into context. Locate terms first, for example:
+
+```bash
+rg -n "closeCursor|executeQuery" references/rx-docs
+rg -n "Content Security Policy|csrf" references/rx-docs
+rg -n "class=|eventHandler" references/rx-docs/27-extension-points
+```
+
+### Concise Generation References
+
+- [Module Development](reference-module.md) — directory structure, info.xml, module.xml, class patterns, router.
+- [Database](reference-database.md) — schema XML, query XML, operations, ruleset.
+- [Templates](reference-template.md) — v1/v2 syntax, directives, filters, includes, resource loading.
+- [Addon/Layout/Widget](reference-addon-layout-widget.md) — structure and patterns for each type.
+- [API & Coding Standards](reference-api-conventions.md) — coding standards, API functions, language files.
+
+These files are quick guides, not substitutes for source verification. For unfamiliar or version-sensitive work, consult the full corpus and target checkout.
 
 ## Critical: Modern Module Structure
 

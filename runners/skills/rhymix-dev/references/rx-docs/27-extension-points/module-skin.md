@@ -1,0 +1,255 @@
+# 27.4 모듈 스킨 (Module Skin)
+
+모듈의 본문 영역 HTML 템플릿 묶음. PC는 `skins/`, 모바일은 `m.skins/`에 위치.
+
+## 디렉토리 구조
+
+```
+modules/<module>/
+├── skins/<skin>/              # PC
+│   ├── skin.xml               # [필수] 메타 + extra_vars + colorset
+│   ├── list.html              # v1 진입 템플릿 (모듈마다 이름이 다름)
+│   ├── list.blade.php         # v2 대안 (같은 basename의 .html과 둘 중 하나)
+│   ├── view.html
+│   ├── _header.html           # 부분 템플릿 (선택)
+│   ├── _footer.html
+│   └── css/, js/, images/
+└── m.skins/<mskin>/           # 모바일 (동일 구조)
+```
+
+## skin.xml
+
+`common/framework/parsers/SkinInfoParser.php`가 파싱.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<skin version="0.2">
+    <title xml:lang="ko">내 스킨</title>
+    <title xml:lang="en">My Skin</title>
+    <description xml:lang="ko">설명…</description>
+    <version>1.0.0</version>
+    <date>2026-05-16</date>
+    <author email_address="me@example.com">
+        <name xml:lang="ko">홍길동</name>
+    </author>
+
+    <extra_vars>
+        <var name="show_thumbnail" type="select" default="Y">
+            <title xml:lang="ko">썸네일 표시</title>
+            <options value="Y"><title xml:lang="ko">사용</title></options>
+            <options value="N"><title xml:lang="ko">사용 안 함</title></options>
+        </var>
+        <var name="thumbnail_width" type="text" default="200">
+            <title xml:lang="ko">썸네일 너비</title>
+        </var>
+    </extra_vars>
+
+    <colorset>
+        <color name="white"><title xml:lang="ko">화이트</title></color>
+        <color name="dark"><title xml:lang="ko">다크</title></color>
+    </colorset>
+</skin>
+```
+
+`extra_vars`의 기본 구조는 레이아웃과 비슷하지만 옵션 문법은 `SkinInfoParser` 규칙을 따른다. v0.2에서는 반복되는 `<options value="...">`를 사용한다. 레이아웃과 달리 모듈 스킨은 최상위 `<colorset><color ...>`도 별도로 파싱한다.
+
+현재 모듈 스킨 설정 템플릿은 `extra_vars`가 하나 이상 있을 때만 그 안쪽의 colorset 선택 UI도 렌더링한다. colorset만 선언하고 `extra_vars`가 전혀 없으면 파서는 colorset을 읽지만 관리자 설정 화면에는 선택 항목이 나타나지 않으므로, 관리자 선택이 필요한 스킨은 최소 1개의 실제 extra_var도 함께 정의해야 한다.
+
+## 모듈별 진입 템플릿명
+
+각 모듈은 자체 템플릿명 규약을 가진다.
+
+### board (게시판)
+
+| 템플릿 | 용도 |
+|---|---|
+| `list.html` | 글 목록 (글 상세는 별도 템플릿 없이 `_read.html`을 include) |
+| `_read.html` | 글 상세 본문 (`list.html`이 `$oDocument->isExists()`일 때 include) |
+| `write_form.html` | 글쓰기 폼 |
+| `comment.html` | 댓글 목록 |
+| `comment_form.html` | 댓글 폼 |
+| `input_password_form.html` | 비밀글 비밀번호 입력 |
+| `delete_form.html` | 글 삭제 확인 |
+| `delete_comment_form.html` | 댓글 삭제 |
+| `delete_trackback_form.html` | 트랙백 삭제 |
+| `tag_list.html` | 태그 목록 |
+| `_header.html`, `_footer.html`, `_comment.html` | 부분 템플릿 |
+
+글 상세는 `view.html` 같은 별도 진입 템플릿이 없다. `list.html`이 문서가 존재하면 `_read.html`을 include해 목록과 같은 진입점에서 상세를 렌더한다 (`board.view.php:224` → `list.html:2`). 댓글 목록 템플릿명은 `comment.html`이며 `board.view.php:844`에서 지정된다. RSS/Atom은 board 스킨이 아니라 별도 `rss` 모듈이 처리한다.
+
+### member (회원)
+
+| 템플릿 | 용도 |
+|---|---|
+| `login_form.html` | 로그인 |
+| `signup_form.html` | 가입 |
+| `member_info.html` | 회원 정보 |
+| `modify_info.html` | 정보 수정 |
+| `find_member_account.html` | 계정 찾기 |
+
+### page (페이지)
+
+| 템플릿 | 용도 |
+|---|---|
+| `content.html` | 페이지 본문 (옵션 — 페이지 콘텐츠는 보통 위젯 페이지로 직접 작성) |
+
+### document / file / comment
+
+이들은 보통 board 등의 보조로 동작하므로 자체 스킨이 거의 없다.
+
+자세한 진입 템플릿 목록은 각 모듈 문서 ([28-modules/](../28-modules/)) 참고.
+
+## 스킨 적용 알고리즘
+
+`ModuleObject::setLayoutAndTemplatePaths()` (`ModuleObject.class.php:697`):
+
+```
+PC:
+    skin = config.skin or 'default'
+    if skin == '/USE_DEFAULT/': skin = ModuleModel::getModuleDefaultSkin(module, 'P')
+    template_path = "<module_path>/skins/<skin>/"
+    if not exists: template_path = "<module_path>/skins/default/"
+
+Mobile:
+    mskin = config.mskin or 'default'
+    if mskin == '/USE_DEFAULT/': mskin = ModuleModel::getModuleDefaultSkin(module, 'M')
+    if mskin == '/USE_RESPONSIVE/': use PC skin
+    else: template_path = "<module_path>/m.skins/<mskin>/"
+    if not exists: fallback to default
+```
+
+### 특수 마커
+
+| 값 | 의미 |
+|---|---|
+| `'default'` | `default/` 디렉토리 |
+| `'/USE_DEFAULT/'` | 모듈의 사이트 기본 스킨 |
+| `'/USE_RESPONSIVE/'` | (mskin만) PC 스킨 사용 |
+
+## 부분 템플릿 인클루드
+
+```html
+<!-- v1 -->
+<include target="_header.html" />
+<include target="_footer.html" />
+
+<!-- v2: .blade.php 파일 또는 첫 줄에 @version(2)을 둔 .html 파일 -->
+@include('_header')
+@include('_footer')
+```
+
+같은 스킨 디렉토리 내 검색. `_` prefix는 관습 (직접 진입 안 함).
+
+## 사용 가능한 변수
+
+| 변수 | 의미 |
+|---|---|
+| `$module_info` | 모듈 인스턴스 정보. 저장된 스킨 extra_vars가 같은 이름의 기존 모듈 속성을 덮어쓰지 않는 범위에서 병합됨 |
+| `$module_info->colorset` | 선택된 컬러셋 |
+| `$lang` | 다국어 객체 |
+| `$logged_info`, `$is_logged` | 사용자 정보 |
+| `$grant` | 현재 사용자 권한 |
+| `$mid` | 현재 mid |
+| 모듈 액션이 `Context::set`한 변수들 | 예: `$documents`, `$page_navigation`, `$oDocument`, ... |
+
+일반 프런트 스킨에서 `$skin_vars` 객체가 자동 제공되는 것은 아니다. 해당 이름은 주로 관리자 스킨 설정 화면에서 DB 레코드 배열로 쓰인다. 프런트 템플릿은 `$module_info->{var_name}`으로 접근해야 한다. 또한 `skin.xml`의 `default`는 설정 UI의 초기값으로 쓰일 뿐 저장되지 않은 값을 런타임 `$module_info`에 항상 주입하지는 않으므로, 필수값은 템플릿이나 모듈 코드에서도 fallback을 두는 것이 안전하다.
+
+## 게시판 스킨 표준 변수 (예시)
+
+`modules/board/skins/default/list.html`에서 사용:
+
+| 변수 | 의미 |
+|---|---|
+| `$document_list` | 글 목록 (DocumentItem array) |
+| `$category_list` | 카테고리 |
+| `$page_navigation` | 페이지네이션 객체 |
+| `$total_count` / `$total_page` / `$page` | 페이지 정보 |
+| `$module_info->use_category` | 카테고리 사용 여부 |
+| `$grant->write_document` | 쓰기 권한 |
+
+`$oDocument`(상세 화면) 예:
+
+```html
+<h1>{$oDocument->getTitle()}</h1>
+<div class="content">{$oDocument->getContent(false)|noescape}</div>
+<div class="author">{$oDocument->getNickName()}</div>
+```
+
+board 상세 화면(`_read.html`)은 `Context::set('oDocument', ...)`로 전달된 `$oDocument`를 사용한다. `$document`는 목록 루프 안에서만 쓰이는 반복 변수다.
+
+## 자원 로드
+
+```html
+<load target="css/style.css" />
+<load target="js/skin.js" type="body" />
+```
+
+스킨 디렉토리 내 경로. `Context::loadFile`이 자동 처리.
+
+컬러셋 기반 CSS. `<load>`의 target은 `{$...}` 템플릿 변수를 치환하지 않으므로 `<load target="css/style.{$module_info->colorset}.css" />`처럼 쓰면 동작하지 않는다. 컬러셋별 CSS는 조건부 load로 나눠 쓰거나 모듈 코드에서 `Context::loadFile()`로 직접 로드한다:
+
+```html
+<load target="css/style.dark.css" cond="$module_info->colorset=='dark'" />
+```
+
+**새 스킨은 인라인 `<script>`/`<style>`, `on*=""` 속성 없이 작성한다.** 스킨 JS는 `js/`, CSS는 `css/`에 두고 `<load>`로 건다. `$module_info`나 목록 데이터 일부를 JS에 넘겨야 하면 `<script id="mySkinConfig" type="application/json">` 블록에 JSON으로 심고 JS에서 `getElementById(...).textContent`를 `JSON.parse`한다. 전체 규칙과 escape 주의점: [19-security.md § Content Security Policy](../19-security.md#content-security-policy).
+
+## 최소 예제
+
+### `modules/myboard/skins/simple/skin.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<skin version="0.2">
+    <title xml:lang="ko">단순 스킨</title>
+    <version>1.0</version>
+    <date>2026-05-16</date>
+    <author><name xml:lang="ko">Me</name></author>
+</skin>
+```
+
+### `modules/myboard/skins/simple/list.html`
+
+```html
+<load target="css/style.css" />
+
+<h2>{$module_info->browser_title}</h2>
+<ul>
+    <!--@foreach($document_list as $doc)-->
+    <li>
+        <a href="{getUrl('document_srl', $doc->document_srl)}">
+            {$doc->getTitle()}
+        </a>
+    </li>
+    <!--@end-->
+</ul>
+
+<div class="pagination">
+    <!--@foreach($page_navigation as $page_no)-->
+    <a href="{getUrl('page', $page_no)}">{$page_no}</a>
+    <!--@end-->
+</div>
+```
+
+`{@ ... }`는 값을 출력하지 않는 PHP 코드 블록이므로 `{@$page_navigation}`은 페이지네이션을 그리지 못한다 (`PageHandler`에는 `__toString`도 없다). `$page_navigation` 객체를 순회해서 그려야 한다.
+
+## 모바일 스킨
+
+같은 구조를 `m.skins/`에 둔다. extra_vars/colorset도 별도.
+
+```
+modules/myboard/m.skins/simple/
+├── skin.xml
+└── list.html
+```
+
+## skin.xml 다국어
+
+XE 호환을 위해 `<title xml:lang="ko">` 다국어를 항상 정의. 미정의 시 기본 lang 폴백.
+
+## 다음 문서
+
+- 레이아웃: [layout.md](layout.md)
+- 위젯: [widget.md](widget.md)
+- 템플릿 엔진: [../09-templates-and-skins.md](../09-templates-and-skins.md)
+- 모바일 감지: [../23-mobile-detection.md](../23-mobile-detection.md)
