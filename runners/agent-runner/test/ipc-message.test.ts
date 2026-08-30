@@ -103,6 +103,26 @@ describe('agent runner IPC message payload', () => {
     });
   });
 
+  it('does not leak Arbiter JSON when the owner action follows the envelope', () => {
+    const payload = buildSendMessageIpcPayload({
+      chatJid: 'dc:123',
+      text: `ESCALATE
+\`\`\`json
+{"rbclaw":{"visibility":"public","text":"사용자 결정이 필요합니다.","arbiterDirective":{"verdict":"escalate","requirements":[],"blockers":[{"id":"approval","scope":"production","action":"user-wait"}]}}}
+\`\`\`
+
+OWNER_ACTION: user-wait`,
+      senderRole: 'arbiter',
+      groupFolder: 'discord-arbiter',
+      timestamp: '2026-08-31T00:00:00.000Z',
+    });
+
+    expect(payload.text).toBe(
+      'ESCALATE\nOWNER_ACTION: user-wait\n\n사용자 결정이 필요합니다.',
+    );
+    expect(payload.text).not.toContain('"rbclaw"');
+  });
+
   it('normalizes markdown image output and preserves attachments', () => {
     expect(
       buildSendMessageIpcPayload({

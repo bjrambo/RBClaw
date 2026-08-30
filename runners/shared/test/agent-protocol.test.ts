@@ -396,6 +396,47 @@ describe('shared agent protocol fallback behavior', () => {
     });
   });
 
+  it('normalizes the observed Arbiter envelope with a trailing owner action', () => {
+    const normalized = normalizeRbclawStructuredOutput(`ESCALATE
+\`\`\`json
+{
+  "rbclaw": {
+    "visibility": "public",
+    "text": "User input is required.",
+    "arbiterDirective": {
+      "verdict": "escalate",
+      "requirements": [],
+      "blockers": [
+        {"id":"user-approval","scope":"production","action":"user-wait"}
+      ]
+    }
+  }
+}
+\`\`\`
+
+OWNER_ACTION: user-wait`);
+
+    expect(normalized).toEqual({
+      result: 'ESCALATE\nOWNER_ACTION: user-wait\n\nUser input is required.',
+      output: {
+        visibility: 'public',
+        text: 'ESCALATE\nOWNER_ACTION: user-wait\n\nUser input is required.',
+        arbiterDirective: {
+          verdict: 'escalate',
+          requirements: [],
+          blockers: [
+            {
+              id: 'user-approval',
+              scope: 'production',
+              action: 'user-wait',
+            },
+          ],
+        },
+      },
+    });
+    expect(normalized.result).not.toContain('"rbclaw"');
+  });
+
   it('marks mismatched visible and structured Arbiter verdicts as protocol errors', () => {
     const normalized = normalizeRbclawStructuredOutput(`PROCEED
 {

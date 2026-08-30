@@ -494,6 +494,8 @@ const LEADING_STRUCTURED_OUTPUT_CONTROL_RE =
   /^[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]+/u;
 const STRUCTURED_STATUS_PREFIX_RE =
   /^(STEP_DONE|TASK_DONE|DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT|PROCEED|REVISE|RESET|ESCALATE)[ \t]*(?:\r?\n)+([\s\S]+)$/;
+const STRUCTURED_OWNER_ACTION_RE =
+  /^OWNER_ACTION[ \t]*:[ \t]*(file-edit|verify|explain|user-wait)[ \t]*$/i;
 
 const ARBITER_STATUS_PREFIXES = new Set([
   'PROCEED',
@@ -595,29 +597,68 @@ function extractStructuredJsonCandidate(trimmed: string): string {
   return fencedJson?.[1]?.trim() ?? trimmed;
 }
 
+function extractOptionalOwnerAction(value: string): {
+  structuredPayload: string;
+  ownerActionLine: string | null;
+} {
+  const lines = value.trim().split(/\r?\n/);
+  const leadingMatch = lines[0]?.trim().match(STRUCTURED_OWNER_ACTION_RE);
+  if (leadingMatch) {
+    return {
+      structuredPayload: lines.slice(1).join('\n').trim(),
+      ownerActionLine: `OWNER_ACTION: ${leadingMatch[1].toLowerCase()}`,
+    };
+  }
+
+  const trailingMatch = lines.at(-1)?.trim().match(STRUCTURED_OWNER_ACTION_RE);
+  if (trailingMatch) {
+    return {
+      structuredPayload: lines.slice(0, -1).join('\n').trim(),
+      ownerActionLine: `OWNER_ACTION: ${trailingMatch[1].toLowerCase()}`,
+    };
+  }
+
+  return {
+    structuredPayload: value.trim(),
+    ownerActionLine: null,
+  };
+}
+
 function extractStructuredCandidateWithOptionalStatus(trimmed: string): {
   jsonCandidate: string;
   statusPrefix: string | null;
+  ownerActionLine: string | null;
 } {
   const statusMatch = trimmed.match(STRUCTURED_STATUS_PREFIX_RE);
   if (!statusMatch) {
     return {
       jsonCandidate: extractStructuredJsonCandidate(trimmed),
       statusPrefix: null,
+      ownerActionLine: null,
     };
   }
 
+  const { structuredPayload, ownerActionLine } = extractOptionalOwnerAction(
+    statusMatch[2],
+  );
+
   return {
-    jsonCandidate: extractStructuredJsonCandidate(statusMatch[2].trim()),
+    jsonCandidate: extractStructuredJsonCandidate(structuredPayload),
     statusPrefix: statusMatch[1],
+    ownerActionLine,
   };
 }
 
 function prefixStructuredText(
   text: string,
   statusPrefix: string | null,
+  ownerActionLine: string | null,
 ): string {
-  return statusPrefix ? `${statusPrefix}\n\n${text}` : text;
+  if (!statusPrefix) return text;
+  const header = ownerActionLine
+    ? `${statusPrefix}\n${ownerActionLine}`
+    : statusPrefix;
+  return `${header}\n\n${text}`;
 }
 
 export function normalizeRbclawStructuredOutput(
@@ -628,7 +669,7 @@ export function normalizeRbclawStructuredOutput(
   }
 
   const trimmed = stripLeadingStructuredOutputControls(result.trim());
-  const { jsonCandidate, statusPrefix } =
+  const { jsonCandidate, statusPrefix, ownerActionLine } =
     extractStructuredCandidateWithOptionalStatus(trimmed);
   try {
     const parsed = JSON.parse(jsonCandidate) as {
@@ -679,7 +720,11 @@ export function normalizeRbclawStructuredOutput(
           statusPrefix?.toLowerCase() !== arbiterDirective.verdict
             ? ('arbiter-verdict-mismatch' as const)
             : undefined;
-        const text = prefixStructuredText(envelope.text, statusPrefix);
+        const text = prefixStructuredText(
+          envelope.text,
+          statusPrefix,
+          ownerActionLine,
+        );
         return {
           result: text,
           output: {

@@ -37,10 +37,11 @@ describe('Arbiter context prompt', () => {
 
     expect(example).toBeDefined();
     expect(normalizeRbclawStructuredOutput(example ?? '')).toMatchObject({
-      result: 'REVISE\n\nExplain the required correction.',
+      result:
+        'REVISE\nOWNER_ACTION: file-edit\n\nExplain the required correction.',
       output: {
         visibility: 'public',
-        text: 'REVISE\n\nExplain the required correction.',
+        text: 'REVISE\nOWNER_ACTION: file-edit\n\nExplain the required correction.',
         arbiterDirective: {
           verdict: 'revise',
           requirements: [
@@ -55,7 +56,7 @@ describe('Arbiter context prompt', () => {
       },
     });
     expect(prompt).toContain(
-      'Do not write explanatory prose outside the fenced JSON object.',
+      'Do not write explanatory prose outside the verdict line, optional OWNER_ACTION line, and fenced JSON object.',
     );
   });
 });

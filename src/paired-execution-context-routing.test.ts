@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { normalizeRbclawStructuredOutput } from 'rbclaw-runners-shared';
 
 vi.mock('./db.js', () => {
   const updatePairedTask = vi.fn();
@@ -226,6 +227,48 @@ describe('paired execution routing loop guards: arbiter verdicts', () => {
         arbiter_verdict: 'escalate',
         arbiter_requested_at: null,
         completion_reason: null,
+      }),
+    );
+  });
+
+  it('accepts an owner-action Arbiter envelope without requesting a correction turn', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_arbitration',
+        round_trip_count: config.ARBITER_DEADLOCK_THRESHOLD,
+        episode_number: 4,
+        total_round_trip_count: 12,
+        arbitration_count: 2,
+        owner_failure_count: 0,
+        arbiter_requested_at: '2026-03-28T00:00:01.000Z',
+      }),
+    );
+    const normalized = normalizeRbclawStructuredOutput(`ESCALATE
+OWNER_ACTION: user-wait
+\`\`\`json
+{"rbclaw":{"visibility":"public","text":"User approval is required.","arbiterDirective":{"verdict":"escalate","requirements":[],"blockers":[{"id":"approval","scope":"production","action":"user-wait"}]}}}
+\`\`\``);
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'arbiter',
+      status: 'succeeded',
+      summary: normalized.result,
+      arbiterDirective:
+        normalized.output?.visibility === 'public'
+          ? normalized.output.arbiterDirective
+          : undefined,
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledTimes(1);
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'active',
+        supervisor_state: 'waiting_user',
+        last_blocker_class: 'user_input',
+        owner_failure_count: 0,
+        arbiter_verdict: 'escalate',
       }),
     );
   });
