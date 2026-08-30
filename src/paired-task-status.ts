@@ -2,6 +2,7 @@ import { updatePairedTaskIfUnchanged } from './db.js';
 import { logger } from './logger.js';
 import type {
   PairedBlockerClass,
+  PairedReviewPhase,
   PairedSupervisorState,
   PairedTaskStatus,
 } from './types.js';
@@ -40,7 +41,12 @@ export const ALLOWED_PAIRED_STATUS_TRANSITIONS: Record<
     'arbiter_requested',
     'completed',
   ]),
-  merge_ready: new Set(['active', 'arbiter_requested', 'completed']),
+  merge_ready: new Set([
+    'active',
+    'review_ready',
+    'arbiter_requested',
+    'completed',
+  ]),
   completed: new Set(),
   arbiter_requested: new Set(['in_arbitration', 'completed']),
   in_arbitration: new Set([
@@ -84,6 +90,7 @@ export function transitionPairedTaskStatus(args: {
     owner_failure_count?: number;
     owner_step_done_streak?: number;
     finalize_step_done_count?: number;
+    review_phase?: PairedReviewPhase;
     task_done_then_user_reopen_count?: number;
     empty_step_done_streak?: number;
     arbiter_verdict?: string | null;
@@ -140,6 +147,7 @@ export function applyPairedTaskPatch(args: {
     owner_failure_count?: number;
     owner_step_done_streak?: number;
     finalize_step_done_count?: number;
+    review_phase?: PairedReviewPhase;
     task_done_then_user_reopen_count?: number;
     empty_step_done_streak?: number;
     status?: PairedTaskStatus;

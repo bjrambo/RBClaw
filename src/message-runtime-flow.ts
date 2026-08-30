@@ -167,6 +167,7 @@ export function buildPendingPairedTurn(args: {
         ),
         lastHumanMessage,
         taskCreatedAt: task.created_at,
+        reviewPhase: task.review_phase,
       }),
       channel: resolveChannel(taskStatus),
       cursor,

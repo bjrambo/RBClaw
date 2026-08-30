@@ -45,6 +45,7 @@ export type PairedTaskUpdates = Partial<
     | 'owner_failure_count'
     | 'owner_step_done_streak'
     | 'finalize_step_done_count'
+    | 'review_phase'
     | 'task_done_then_user_reopen_count'
     | 'empty_step_done_streak'
     | 'status'
@@ -95,6 +96,7 @@ function hydratePairedTaskRow(
     last_arbiter_directive_json: row.last_arbiter_directive_json ?? null,
     retry_count: row.retry_count ?? 0,
     external_wait_ref: row.external_wait_ref ?? null,
+    review_phase: row.review_phase ?? 'implementation',
     owner_service_id: ownerServiceId,
     reviewer_service_id: reviewerServiceId,
     owner_agent_type: ownerAgentType,
@@ -156,6 +158,7 @@ export function createPairedTaskInDatabase(
           owner_failure_count,
           owner_step_done_streak,
           finalize_step_done_count,
+          review_phase,
           task_done_then_user_reopen_count,
           empty_step_done_streak,
           status,
@@ -165,7 +168,7 @@ export function createPairedTaskInDatabase(
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     )
     .run(
@@ -201,6 +204,7 @@ export function createPairedTaskInDatabase(
       task.owner_failure_count ?? 0,
       task.owner_step_done_streak ?? 0,
       task.finalize_step_done_count ?? 0,
+      task.review_phase ?? 'implementation',
       task.task_done_then_user_reopen_count ?? 0,
       task.empty_step_done_streak ?? 0,
       task.status,
@@ -393,6 +397,10 @@ export function updatePairedTaskInDatabase(
     fields.push('finalize_step_done_count = ?');
     values.push(updates.finalize_step_done_count);
   }
+  if (updates.review_phase !== undefined) {
+    fields.push('review_phase = ?');
+    values.push(updates.review_phase);
+  }
   if (updates.task_done_then_user_reopen_count !== undefined) {
     fields.push('task_done_then_user_reopen_count = ?');
     values.push(updates.task_done_then_user_reopen_count);
@@ -523,6 +531,10 @@ export function updatePairedTaskIfUnchangedInDatabase(
   if (updates.finalize_step_done_count !== undefined) {
     fields.push('finalize_step_done_count = ?');
     values.push(updates.finalize_step_done_count);
+  }
+  if (updates.review_phase !== undefined) {
+    fields.push('review_phase = ?');
+    values.push(updates.review_phase);
   }
   if (updates.task_done_then_user_reopen_count !== undefined) {
     fields.push('task_done_then_user_reopen_count = ?');

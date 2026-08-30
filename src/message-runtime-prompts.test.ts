@@ -118,6 +118,26 @@ describe('message-runtime-prompts carry-forward guidance', () => {
 });
 
 describe('message-runtime-prompts output-only context', () => {
+  it('marks the reviewer pass that closes final owner execution', () => {
+    const prompt = buildReviewerPendingPrompt({
+      chatJid: 'group@test',
+      timezone: 'UTC',
+      turnOutputs: [
+        makeTurnOutput(
+          'TASK_DONE\n상태: 커밋·배포·재시작과 운영 검증 완료',
+          'owner',
+        ),
+      ],
+      recentHumanMessages: [],
+      lastHumanMessage: null,
+      reviewPhase: 'final',
+    });
+
+    expect(prompt).toContain('Current review phase: final verification.');
+    expect(prompt).toContain('TASK_DONE closes the task');
+    expect(prompt).toContain('deployment, restart, and operational evidence');
+  });
+
   it('keeps reviewer pending prompts output-only when current task outputs exist', () => {
     const prompt = buildReviewerPendingPrompt({
       chatJid: 'group@test',

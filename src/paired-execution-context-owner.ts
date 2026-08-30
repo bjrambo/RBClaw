@@ -30,7 +30,7 @@ import {
   serializeChecklistPlan,
 } from './checklist-continuation.js';
 import type { OwnerRequiredAction } from './paired-owner-action.js';
-import type { PairedTask } from './types.js';
+import type { PairedReviewPhase, PairedTask } from './types.js';
 
 type OwnerFinalizeOutcome = 'stop' | 're_review';
 const OWNER_FAILURE_ESCALATION_THRESHOLD = 2;
@@ -389,6 +389,7 @@ function handleOwnerFinalizeCompletion(args: {
       task,
       taskId,
       now,
+      reviewPhase: 'implementation',
       logMessage:
         ownerVerdict === 'step_done'
           ? 'Auto-triggered reviewer after owner finalize STEP_DONE'
@@ -418,16 +419,17 @@ function handleOwnerFinalizeCompletion(args: {
   }
   task.plan_notes = checklistFinalization.planNotes;
 
-  transitionPairedTaskStatus({
+  maybeAutoTriggerReviewerAfterOwnerCompletion({
+    task,
     taskId,
-    currentStatus: task.status,
-    nextStatus: 'completed',
-    expectedUpdatedAt: task.updated_at,
-    updatedAt: now,
+    now,
+    reviewPhase: 'final',
+    enforceProgressLimits: false,
+    logMessage: 'Auto-triggered final reviewer after owner finalize completion',
+    summary,
     patch: {
       ...progressPatch,
       plan_notes: task.plan_notes,
-      completion_reason: 'done',
       owner_failure_count: 0,
       owner_step_done_streak: 0,
       finalize_step_done_count: nextFinalizeStepDoneCount,
@@ -436,7 +438,7 @@ function handleOwnerFinalizeCompletion(args: {
   });
   logger.info(
     { taskId, hasNewChanges, summary: summary?.slice(0, 100) },
-    'Owner finalized after reviewer approval — task completed',
+    'Owner finalized after reviewer approval — final reviewer requested',
   );
   return 'stop';
 }
@@ -505,8 +507,12 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
   task: PairedTask;
   taskId: string;
   now: string;
+  reviewPhase: PairedReviewPhase;
+  enforceProgressLimits?: boolean;
   logMessage: string;
   patch?: {
+    plan_notes?: string | null;
+    owner_failure_count?: number;
     owner_step_done_streak?: number;
     finalize_step_done_count?: number;
     empty_step_done_streak?: number;
@@ -525,8 +531,9 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
   const stagnationCount =
     combinedPatch.stagnation_count ?? task.stagnation_count ?? 0;
   if (
-    stagnationCount >= PAIRED_STAGNATION_THRESHOLD ||
-    task.round_trip_count >= PAIRED_MAX_EPISODE_ROUND_TRIPS
+    args.enforceProgressLimits !== false &&
+    (stagnationCount >= PAIRED_STAGNATION_THRESHOLD ||
+      task.round_trip_count >= PAIRED_MAX_EPISODE_ROUND_TRIPS)
   ) {
     if ((task.arbitration_count ?? 0) < PAIRED_MAX_ARBITRATIONS) {
       requestArbiterOrEscalate({
@@ -576,7 +583,10 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
       nextStatus: 'review_ready',
       expectedUpdatedAt: currentTask.updated_at,
       updatedAt: now,
-      patch: { review_requested_at: now },
+      patch: {
+        review_requested_at: now,
+        review_phase: args.reviewPhase,
+      },
     });
     const reviewReadyTask = getPairedTaskById(taskId);
     if (!reviewReadyTask) {
@@ -593,6 +603,7 @@ function maybeAutoTriggerReviewerAfterOwnerCompletion(args: {
         owner_failure_count: 0,
         owner_step_done_streak: 0,
         empty_step_done_streak: 0,
+        review_phase: args.reviewPhase,
         ...combinedPatch,
       },
     });
@@ -634,6 +645,7 @@ export function handleOwnerCompletion(args: {
         task,
         taskId,
         now,
+        reviewPhase: 'implementation',
         logMessage:
           'Auto-triggered reviewer after owner finalize required re-review',
         summary,
@@ -779,6 +791,7 @@ export function handleOwnerCompletion(args: {
     task,
     taskId,
     now,
+    reviewPhase: 'implementation',
     logMessage: 'Auto-triggered reviewer after owner completion',
     summary,
     patch: {

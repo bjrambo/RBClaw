@@ -330,7 +330,7 @@ describe('paired execution routing loop guards: terminal failures and owner revi
     );
   });
 
-  it('completes reviewer task after terminal Codex account failure instead of preserving review_ready loop', () => {
+  it('parks reviewer task after terminal account failure instead of completing silently', () => {
     vi.mocked(db.getPairedTaskById).mockReturnValue(
       buildPairedTask({
         status: 'in_review',
@@ -349,10 +349,12 @@ describe('paired execution routing loop guards: terminal failures and owner revi
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({
-        status: 'completed',
-        arbiter_verdict: 'escalate',
+        status: 'review_ready',
+        supervisor_state: 'waiting_user',
+        last_blocker_class: 'authentication',
+        arbiter_verdict: null,
         arbiter_requested_at: null,
-        completion_reason: 'reviewer_codex_unavailable',
+        completion_reason: null,
       }),
     );
   });

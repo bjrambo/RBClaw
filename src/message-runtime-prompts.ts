@@ -10,6 +10,7 @@ import { formatMessages } from './router.js';
 import type {
   NewMessage,
   OutboundAttachment,
+  PairedReviewPhase,
   PairedTask,
   PairedTurnOutput,
 } from './types.js';
@@ -229,21 +230,26 @@ export function buildReviewerPendingPrompt(args: {
   recentHumanMessages: NewMessage[];
   lastHumanMessage: string | null | undefined;
   taskCreatedAt?: string | null;
+  reviewPhase?: PairedReviewPhase | null;
 }): string {
+  const finalReviewGuidance =
+    args.reviewPhase === 'final'
+      ? "\n\nCurrent review phase: final verification. Verify the owner's claimed completion, Git, deployment, restart, and operational evidence that are in the approved user scope. If everything is complete, TASK_DONE closes the task; return work to the owner only for a concrete defect or missing requested action."
+      : '';
   if (args.turnOutputs.length > 0) {
-    return turnOutputsOnlyPrompt(
+    return `${turnOutputsOnlyPrompt(
       args.chatJid,
       args.timezone,
       args.turnOutputs,
       currentTaskHumanMessages(args.recentHumanMessages, args.taskCreatedAt),
-    );
+    )}${finalReviewGuidance}`;
   }
 
   if (!args.lastHumanMessage) {
-    return 'Review the latest owner changes in the configured project directory.';
+    return `Review the latest owner changes in the configured project directory.${finalReviewGuidance}`;
   }
 
-  return `User request:\n---\n${args.lastHumanMessage}\n---\n\nReview the latest owner changes in the configured project directory.`;
+  return `User request:\n---\n${args.lastHumanMessage}\n---\n\nReview the latest owner changes in the configured project directory.${finalReviewGuidance}`;
 }
 
 export function buildOwnerPendingPrompt(args: {

@@ -132,6 +132,7 @@ function createActiveTaskForRoom(args: {
     owner_failure_count: 0,
     owner_step_done_streak: 0,
     finalize_step_done_count: 0,
+    review_phase: 'implementation',
     task_done_then_user_reopen_count: 0,
     empty_step_done_streak: 0,
     status: 'active',

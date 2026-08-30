@@ -99,6 +99,8 @@ export type PairedTaskStatus =
   | 'arbiter_requested'
   | 'in_arbitration';
 
+export type PairedReviewPhase = 'implementation' | 'final';
+
 export type PairedTurnReservationIntentKind =
   | 'owner-turn'
   | 'reviewer-turn'
@@ -172,6 +174,7 @@ export interface PairedTask {
   owner_failure_count?: number | null;
   owner_step_done_streak?: number | null;
   finalize_step_done_count?: number | null;
+  review_phase?: PairedReviewPhase | null;
   task_done_then_user_reopen_count?: number | null;
   empty_step_done_streak?: number | null;
   status: PairedTaskStatus;

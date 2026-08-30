@@ -712,12 +712,52 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
       return;
     }
     const finishedTask = getPairedTaskById(pairedExecutionContext.task.id);
+    await this.notifyReviewerAuthenticationFailureIfNeeded(state, finishedTask);
     await notifyPairedCompletionIfNeeded({
       task: finishedTask,
       chatJid,
       onOutput,
     });
     this.queueFollowUpIfNeeded(state, finishedTask);
+  }
+
+  private async notifyReviewerAuthenticationFailureIfNeeded(
+    state: FinalizeState,
+    finishedTask: PairedTaskRecord | null | undefined,
+  ): Promise<void> {
+    const { chatJid, completedRole, onOutput, log } = this.args;
+    if (
+      completedRole !== 'reviewer' ||
+      state.effectiveStatus !== 'failed' ||
+      state.sawOutputForFollowUp ||
+      finishedTask?.status !== 'review_ready' ||
+      finishedTask.supervisor_state !== 'waiting_user' ||
+      finishedTask.last_blocker_class !== 'authentication'
+    ) {
+      return;
+    }
+
+    const sender = getLastHumanMessageSender(chatJid);
+    const mention = sender ? `<@${sender}> ` : '';
+    const message = [
+      'BLOCKED',
+      '',
+      `${mention}리뷰어 인증이 만료되어 검토를 완료하지 못했습니다. Claude 계정을 다시 인증한 뒤 리뷰를 재개해야 합니다. 태스크는 완료 처리하지 않고 보류했습니다.`,
+    ].join('\n');
+    await onOutput?.({
+      status: 'success',
+      result: message,
+      output: { visibility: 'public', text: message },
+      phase: 'final',
+    });
+    log.warn(
+      {
+        pairedTaskId: finishedTask.id,
+        role: completedRole,
+        blockerClass: finishedTask.last_blocker_class,
+      },
+      'Emitted sanitized reviewer authentication failure notice',
+    );
   }
 
   private queueFollowUpIfNeeded(

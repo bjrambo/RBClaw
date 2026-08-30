@@ -38,6 +38,12 @@ describe('paired task status transitions', () => {
         nextStatus: 'review_ready',
       }),
     ).not.toThrow();
+    expect(() =>
+      assertPairedTaskStatusTransition({
+        currentStatus: 'merge_ready',
+        nextStatus: 'review_ready',
+      }),
+    ).not.toThrow();
   });
 
   it('rejects invalid transitions', () => {

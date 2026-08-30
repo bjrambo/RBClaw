@@ -84,6 +84,7 @@ function getScopedTask(
                  owner_failure_count,
                  owner_step_done_streak,
                  finalize_step_done_count,
+                 review_phase,
                  task_done_then_user_reopen_count,
                  empty_step_done_streak,
                  arbiter_verdict,

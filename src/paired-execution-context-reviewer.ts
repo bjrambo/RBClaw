@@ -21,16 +21,23 @@ export function handleFailedReviewerExecution(args: {
   const now = new Date().toISOString();
 
   if (isTerminalCodexAccountFailure(summary)) {
+    const nextStatus =
+      task.status === 'in_review' ? 'review_ready' : task.status;
     transitionPairedTaskStatus({
       taskId,
       currentStatus: task.status,
-      nextStatus: 'completed',
+      nextStatus,
       expectedUpdatedAt: task.updated_at,
       updatedAt: now,
       patch: {
-        arbiter_verdict: 'escalate',
+        supervisor_state: 'waiting_user',
+        supervisor_state_changed_at: now,
+        last_blocker_class: 'authentication',
+        resume_at: null,
+        external_wait_ref: null,
+        arbiter_verdict: null,
         arbiter_requested_at: null,
-        completion_reason: 'reviewer_codex_unavailable',
+        completion_reason: null,
       },
     });
     logger.warn(
@@ -40,7 +47,7 @@ export function handleFailedReviewerExecution(args: {
         status: task.status,
         summary: summary?.slice(0, 200),
       },
-      'Completed reviewer task after terminal Codex account failure instead of preserving review loop',
+      'Parked reviewer task after terminal account failure instead of completing silently',
     );
     return;
   }
@@ -55,15 +62,19 @@ export function handleFailedReviewerExecution(args: {
       signal.kind === 'complete' ||
       signal.kind === 'request_owner_changes'
     ) {
+      const finalReviewApproved =
+        signal.kind === 'request_owner_finalize' &&
+        task.review_phase === 'final';
       const approvedSourceRef =
-        signal.kind === 'request_owner_finalize'
+        signal.kind === 'request_owner_finalize' && !finalReviewApproved
           ? resolveCanonicalSourceRef(resolveDirectWorkDir(task.work_dir))
           : task.source_ref;
       transitionPairedTaskStatus({
         taskId,
         currentStatus: task.status,
-        nextStatus:
-          signal.kind === 'request_owner_finalize'
+        nextStatus: finalReviewApproved
+          ? 'completed'
+          : signal.kind === 'request_owner_finalize'
             ? 'merge_ready'
             : signal.kind === 'request_owner_changes'
               ? 'active'
@@ -71,9 +82,10 @@ export function handleFailedReviewerExecution(args: {
         expectedUpdatedAt: task.updated_at,
         updatedAt: now,
         patch: {
-          ...(signal.kind === 'request_owner_finalize'
+          ...(signal.kind === 'request_owner_finalize' && !finalReviewApproved
             ? {
                 source_ref: approvedSourceRef,
+                review_phase: 'implementation' as const,
                 owner_failure_count: 0,
                 owner_step_done_streak: 0,
                 finalize_step_done_count: 0,
@@ -81,6 +93,15 @@ export function handleFailedReviewerExecution(args: {
                 arbiter_verdict: null,
                 arbiter_requested_at: null,
               }
+            : {}),
+          ...(finalReviewApproved
+            ? {
+                completion_reason: 'done',
+                review_phase: 'final' as const,
+              }
+            : {}),
+          ...(signal.kind === 'request_owner_changes'
+            ? { review_phase: 'implementation' as const }
             : {}),
           ...(signal.kind === 'complete'
             ? { completion_reason: signal.completionReason }
@@ -94,7 +115,9 @@ export function handleFailedReviewerExecution(args: {
           approvedSourceRef,
           summary: summary.slice(0, 100),
         },
-        'Reviewer verdict detected from failed execution — stopping ping-pong',
+        finalReviewApproved
+          ? 'Final reviewer approval detected from failed execution — task completed'
+          : 'Reviewer verdict detected from failed execution — stopping ping-pong',
       );
       return;
     }
@@ -140,6 +163,27 @@ export function handleReviewerCompletion(args: {
 
   switch (signal.kind) {
     case 'request_owner_finalize': {
+      if (task.review_phase === 'final') {
+        transitionPairedTaskStatus({
+          taskId,
+          currentStatus: task.status,
+          nextStatus: 'completed',
+          expectedUpdatedAt: task.updated_at,
+          updatedAt: now,
+          patch: {
+            completion_reason: 'done',
+            review_phase: 'final',
+            owner_failure_count: 0,
+            owner_step_done_streak: 0,
+            empty_step_done_streak: 0,
+          },
+        });
+        logger.info(
+          { taskId, verdict, summary: summary?.slice(0, 100) },
+          'Final reviewer approved owner completion — task completed',
+        );
+        return;
+      }
       const approvedSourceRef = resolveCanonicalSourceRef(
         resolveDirectWorkDir(task.work_dir),
       );
@@ -151,6 +195,7 @@ export function handleReviewerCompletion(args: {
         updatedAt: now,
         patch: {
           source_ref: approvedSourceRef,
+          review_phase: 'implementation',
           owner_failure_count: 0,
           owner_step_done_streak: 0,
           finalize_step_done_count: 0,
@@ -199,6 +244,7 @@ export function handleReviewerCompletion(args: {
         nextStatus: 'active',
         expectedUpdatedAt: task.updated_at,
         updatedAt: now,
+        patch: { review_phase: 'implementation' },
       });
       logger.info(
         { taskId, verdict },

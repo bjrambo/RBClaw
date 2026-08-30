@@ -331,6 +331,95 @@ describe('createPairedExecutionLifecycle verdict routing', () => {
 });
 
 describe('createPairedExecutionLifecycle completion handling', () => {
+  it('emits a sanitized BLOCKED notice when reviewer authentication expires', async () => {
+    const outputs: AgentOutput[] = [];
+    const enqueueMessageCheck = vi.fn();
+    const authFailure =
+      'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.';
+
+    vi.mocked(db.getPairedTaskById).mockReturnValue({
+      id: 'paired-task-reviewer-auth-expired',
+      chat_jid: 'group@test',
+      group_folder: 'test-group',
+      work_dir: '/tmp/rbclaw-test-work',
+      owner_service_id: 'codex-main',
+      reviewer_service_id: 'claude',
+      owner_agent_type: 'codex',
+      reviewer_agent_type: 'claude-code',
+      title: null,
+      source_ref: 'HEAD',
+      plan_notes: null,
+      round_trip_count: 1,
+      review_requested_at: '2026-04-09T00:00:00.000Z',
+      status: 'review_ready',
+      supervisor_state: 'waiting_user',
+      last_blocker_class: 'authentication',
+      arbiter_verdict: null,
+      arbiter_requested_at: null,
+      completion_reason: null,
+      created_at: '2026-04-09T00:00:00.000Z',
+      updated_at: '2026-04-09T00:00:01.000Z',
+    });
+
+    const lifecycle = createPairedExecutionLifecycle({
+      pairedExecutionContext: {
+        task: {
+          id: 'paired-task-reviewer-auth-expired',
+          chat_jid: 'group@test',
+          group_folder: 'test-group',
+          work_dir: '/tmp/rbclaw-test-work',
+          owner_service_id: 'codex-main',
+          reviewer_service_id: 'claude',
+          owner_agent_type: 'codex',
+          reviewer_agent_type: 'claude-code',
+          title: null,
+          source_ref: 'HEAD',
+          plan_notes: null,
+          round_trip_count: 1,
+          review_requested_at: '2026-04-09T00:00:00.000Z',
+          status: 'in_review',
+          arbiter_verdict: null,
+          arbiter_requested_at: null,
+          completion_reason: null,
+          created_at: '2026-04-09T00:00:00.000Z',
+          updated_at: '2026-04-09T00:00:00.000Z',
+        },
+        workDir: '/tmp/rbclaw-test-work',
+        envOverrides: {},
+        requiresVisibleVerdict: true,
+      },
+      pairedTurnIdentity: {
+        turnId:
+          'paired-task-reviewer-auth-expired:2026-04-09T00:00:00.000Z:reviewer-turn',
+        taskId: 'paired-task-reviewer-auth-expired',
+        taskUpdatedAt: '2026-04-09T00:00:00.000Z',
+        intentKind: 'reviewer-turn',
+        role: 'reviewer',
+      },
+      completedRole: 'reviewer',
+      chatJid: 'group@test',
+      runId: 'run-reviewer-auth-expired',
+      enqueueMessageCheck,
+      onOutput: async (output) => {
+        outputs.push(output);
+      },
+      log,
+    });
+
+    lifecycle.updateSummary({ outputText: authFailure });
+    lifecycle.markStatus('failed');
+    lifecycle.markSawOutput(false);
+    await lifecycle.asyncFinalize();
+
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.result).toMatch(/^BLOCKED\n/);
+    expect(outputs[0]?.result).toContain(
+      '리뷰어 인증이 만료되어 검토를 완료하지 못했습니다.',
+    );
+    expect(outputs[0]?.result).not.toContain(authFailure);
+    expect(enqueueMessageCheck).not.toHaveBeenCalled();
+  });
+
   it('does not emit a second public notification after arbiter ESCALATE', async () => {
     const outputs: AgentOutput[] = [];
 

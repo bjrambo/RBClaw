@@ -164,6 +164,7 @@ function buildPairedTask(overrides: Partial<PairedTask> = {}): PairedTask {
     owner_failure_count: 0,
     owner_step_done_streak: 0,
     finalize_step_done_count: 0,
+    review_phase: 'implementation',
     task_done_then_user_reopen_count: 0,
     empty_step_done_streak: 0,
     status: 'active',
@@ -632,7 +633,7 @@ describe('paired execution context owner completion handling', () => {
     expect(db.updatePairedTask).not.toHaveBeenCalled();
   });
 
-  it('completes owner finalize when only the commit object changed after approval', () => {
+  it('requests final review when only the commit object changed after approval', () => {
     const repoDir = createCanonicalRepoWithCommit('reviewed');
     const approvedSourceRef = resolveTreeRef(repoDir);
     execFileSync('git', ['commit', '--allow-empty', '-m', 'metadata only'], {
@@ -657,11 +658,14 @@ describe('paired execution context owner completion handling', () => {
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
-      expect.objectContaining({ status: 'completed' }),
+      expect.objectContaining({
+        status: 'review_ready',
+        review_phase: 'final',
+      }),
     );
   });
 
-  it('completes owner finalize with an unchanged nested repository', () => {
+  it('requests final review with an unchanged nested repository', () => {
     const repoDir = createCanonicalRepoWithCommit('reviewed');
     createNestedRepoWithCommit(repoDir);
     const approvedSourceRef = resolveTreeRef(repoDir);
@@ -684,7 +688,10 @@ describe('paired execution context owner completion handling', () => {
 
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
-      expect.objectContaining({ status: 'completed' }),
+      expect.objectContaining({
+        status: 'review_ready',
+        review_phase: 'final',
+      }),
     );
   });
 
@@ -850,6 +857,59 @@ describe('paired execution context owner completion handling', () => {
     expect(db.updatePairedTask).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({ status: 'review_ready' }),
+    );
+  });
+});
+
+describe('paired execution context final reviewer handling', () => {
+  registerPairedContextHooks();
+
+  it('completes the task when the final reviewer approves', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_review',
+        review_phase: 'final',
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'reviewer',
+      status: 'succeeded',
+      summary: 'TASK_DONE\n최종 운영 검증 승인',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'completed',
+        completion_reason: 'done',
+        review_phase: 'final',
+      }),
+    );
+  });
+
+  it('returns final-review findings to implementation phase', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_review',
+        review_phase: 'final',
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'reviewer',
+      status: 'succeeded',
+      summary: 'STEP_DONE\nOWNER_ACTION: file-edit\n배포 검증 결함 수정 필요',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'active',
+        review_phase: 'implementation',
+      }),
     );
   });
 });
@@ -1210,6 +1270,31 @@ describe('paired execution context failed execution handling', () => {
         source_ref: approvedSourceRef,
         owner_step_done_streak: 0,
         empty_step_done_streak: 0,
+      }),
+    );
+  });
+
+  it('completes final review when TASK_DONE arrives through failed fallback', () => {
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'in_review',
+        review_phase: 'final',
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'reviewer',
+      status: 'failed',
+      summary: 'TASK_DONE\n최종 검증 승인',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'completed',
+        completion_reason: 'done',
+        review_phase: 'final',
       }),
     );
   });
