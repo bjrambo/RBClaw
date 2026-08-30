@@ -31,6 +31,11 @@ import type {
   PairedRoomRole,
 } from './types.js';
 import { hasChecklistContinuation } from './checklist-continuation.js';
+import {
+  assessOwnerCompletionEvidence,
+  buildRejectedOwnerOutput,
+  type OwnerRequiredAction,
+} from './paired-owner-action.js';
 
 type ExecutorLog = Pick<typeof logger, 'info' | 'warn'>;
 
@@ -63,6 +68,10 @@ function completeStoredExecution(
   status: 'succeeded' | 'failed',
   runId: string,
   summary: string | null,
+  ownerRequiredAction?: OwnerRequiredAction,
+  ownerTurnSourceRef?: string | null,
+  ownerTaskSourceRef?: string | null,
+  ownerEvidenceRejectionReason?: string | null,
   arbiterDirective?: ArbiterDirective,
   protocolError?: 'arbiter-verdict-mismatch',
 ): void {
@@ -72,8 +81,12 @@ function completeStoredExecution(
     status,
     runId,
     summary,
-    arbiterDirective,
-    protocolError,
+    ...(ownerRequiredAction !== undefined ? { ownerRequiredAction } : {}),
+    ...(ownerTurnSourceRef != null ? { ownerTurnSourceRef } : {}),
+    ...(ownerTaskSourceRef != null ? { ownerTaskSourceRef } : {}),
+    ...(ownerEvidenceRejectionReason ? { ownerEvidenceRejectionReason } : {}),
+    ...(arbiterDirective ? { arbiterDirective } : {}),
+    ...(protocolError ? { protocolError } : {}),
   });
 }
 
@@ -146,6 +159,7 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
   private pairedFinalAttachments: OutboundAttachment[] = [];
   private pairedFinalArbiterDirective: ArbiterDirective | undefined;
   private pairedFinalProtocolError: 'arbiter-verdict-mismatch' | undefined;
+  private ownerEvidenceRejectionReason: string | null = null;
   private pairedSummaryLocked = false;
   private pairedExecutionCompleted = false;
   private pairedExecutionDelegated = false;
@@ -196,6 +210,35 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     if (!this.currentRunOwnsActiveAttempt('streamed-final-output')) {
       return false;
     }
+    if (this.ownerEvidenceRejectionReason) {
+      return false;
+    }
+    const ownerEvidence = this.assessOwnerFinalOutput(outputText);
+    if (!ownerEvidence.accepted && ownerEvidence.reason) {
+      this.ownerEvidenceRejectionReason = ownerEvidence.reason;
+      this.pairedFinalOutput = buildRejectedOwnerOutput({
+        outputText,
+        reason: ownerEvidence.reason,
+        retryAction: ownerEvidence.retryAction ?? 'explain',
+      });
+      this.pairedExecutionSummary = outputText;
+      this.pairedSummaryLocked = true;
+      this.pairedSawOutput = true;
+      this.persistPairedTurnOutputIfNeeded();
+      this.args.log.warn(
+        {
+          pairedTaskId: this.args.pairedExecutionContext?.task.id ?? null,
+          requiredAction:
+            this.args.pairedExecutionContext?.ownerRequiredAction ??
+            'unspecified',
+          hasChangesThisTurn: ownerEvidence.hasChangesThisTurn,
+          hasTaskChanges: ownerEvidence.hasTaskChanges,
+          reason: ownerEvidence.reason,
+        },
+        'Rejected contradictory or unsupported owner final before delivery',
+      );
+      return false;
+    }
     this.lockVisibleVerdict(
       outputText,
       attachments,
@@ -219,13 +262,17 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     }
 
     this.clearLeaseHeartbeat();
-    completePairedExecutionContext({
-      taskId: pairedExecutionContext.task.id,
-      role: completedRole,
+    completeStoredExecution(
+      pairedExecutionContext.task.id,
+      completedRole,
       status,
       runId,
-      summary: this.pairedExecutionSummary,
-    });
+      this.pairedExecutionSummary,
+      pairedExecutionContext.ownerRequiredAction,
+      pairedExecutionContext.ownerTurnSourceRef,
+      pairedExecutionContext.ownerTaskSourceRef,
+      this.ownerEvidenceRejectionReason,
+    );
     this.pairedExecutionCompleted = true;
   }
 
@@ -442,15 +489,19 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     this.pairedSawOutput = true;
     this.persistPairedTurnOutputIfNeeded();
     this.clearLeaseHeartbeat();
-    completePairedExecutionContext({
-      taskId: pairedExecutionContext.task.id,
-      role: completedRole,
-      status: 'succeeded',
+    completeStoredExecution(
+      pairedExecutionContext.task.id,
+      completedRole,
+      'succeeded',
       runId,
-      summary: this.pairedExecutionSummary,
-      arbiterDirective: this.pairedFinalArbiterDirective,
-      protocolError: this.pairedFinalProtocolError,
-    });
+      this.pairedExecutionSummary,
+      pairedExecutionContext.ownerRequiredAction,
+      pairedExecutionContext.ownerTurnSourceRef,
+      pairedExecutionContext.ownerTaskSourceRef,
+      this.ownerEvidenceRejectionReason,
+      this.pairedFinalArbiterDirective,
+      this.pairedFinalProtocolError,
+    );
     this.pairedExecutionCompleted = true;
   }
 
@@ -474,6 +525,27 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
       this.pairedSummaryLocked = true;
     }
     this.pairedSawOutput = true;
+  }
+
+  private assessOwnerFinalOutput(outputText: string) {
+    const { completedRole, pairedExecutionContext } = this.args;
+    if (completedRole !== 'owner' || !pairedExecutionContext) {
+      return {
+        accepted: true,
+        hasChangesThisTurn: null,
+        hasTaskChanges: null,
+        retryAction: null,
+        reason: null,
+      } as const;
+    }
+    return assessOwnerCompletionEvidence({
+      workDir: pairedExecutionContext.workDir,
+      turnSourceRef: pairedExecutionContext.ownerTurnSourceRef,
+      taskSourceRef: pairedExecutionContext.ownerTaskSourceRef,
+      requiredAction:
+        pairedExecutionContext.ownerRequiredAction ?? 'unspecified',
+      outputText,
+    });
   }
 
   private adoptDirectTerminalDeliveryIfNeeded(): string | null {
@@ -606,6 +678,10 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
       state.effectiveStatus,
       runId,
       this.pairedExecutionSummary,
+      pairedExecutionContext.ownerRequiredAction,
+      pairedExecutionContext.ownerTurnSourceRef,
+      pairedExecutionContext.ownerTaskSourceRef,
+      this.ownerEvidenceRejectionReason,
       this.pairedFinalArbiterDirective,
       this.pairedFinalProtocolError,
     );

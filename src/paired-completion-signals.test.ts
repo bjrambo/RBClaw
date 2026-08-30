@@ -34,6 +34,39 @@ describe('paired completion signals', () => {
     ).toEqual({ kind: 'request_arbiter' });
   });
 
+  it('keeps a required file edit with no turn change in the owner loop', () => {
+    expect(
+      resolveOwnerCompletionSignal({
+        phase: 'normal',
+        visibleVerdict: 'task_done',
+        requiredAction: 'file-edit',
+        hasChangesThisTurn: false,
+      }),
+    ).toEqual({ kind: 'request_owner_changes' });
+
+    expect(
+      resolveOwnerCompletionSignal({
+        phase: 'normal',
+        visibleVerdict: 'task_done',
+        requiredAction: 'verify',
+        hasChangesThisTurn: false,
+      }),
+    ).toEqual({
+      kind: 'request_reviewer',
+      resetStatusToActive: false,
+    });
+  });
+
+  it('keeps contradictory owner evidence in the owner loop', () => {
+    expect(
+      resolveOwnerCompletionSignal({
+        phase: 'normal',
+        visibleVerdict: 'task_done',
+        evidenceConsistent: false,
+      }),
+    ).toEqual({ kind: 'request_owner_changes' });
+  });
+
   it('maps finalize owner outcomes to complete, re-review, or arbiter', () => {
     expect(
       resolveOwnerCompletionSignal({

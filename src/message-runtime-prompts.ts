@@ -2,6 +2,10 @@ import { isModelDocumentPath } from 'rbclaw-runners-shared';
 
 import { buildArbiterContextPrompt } from './arbiter-context.js';
 import { TASK_USER_CONTEXT_START_SKEW_MS } from './message-runtime-task-context.js';
+import {
+  ownerActionPromptHint,
+  type OwnerRequiredAction,
+} from './paired-owner-action.js';
 import { formatMessages } from './router.js';
 import type {
   NewMessage,
@@ -249,21 +253,34 @@ export function buildOwnerPendingPrompt(args: {
   recentHumanMessages: NewMessage[];
   lastHumanMessage: string | null | undefined;
   taskCreatedAt?: string | null;
+  requiredAction?: OwnerRequiredAction;
 }): string {
+  const actionHint = ownerActionPromptHint(
+    args.requiredAction ?? 'unspecified',
+  );
+  const withActionHint = (prompt: string): string =>
+    actionHint ? `${prompt}\n\n${actionHint}` : prompt;
+
   if (args.turnOutputs.length > 0) {
-    return turnOutputsOnlyPrompt(
-      args.chatJid,
-      args.timezone,
-      args.turnOutputs,
-      currentTaskHumanMessages(args.recentHumanMessages, args.taskCreatedAt),
+    return withActionHint(
+      turnOutputsOnlyPrompt(
+        args.chatJid,
+        args.timezone,
+        args.turnOutputs,
+        currentTaskHumanMessages(args.recentHumanMessages, args.taskCreatedAt),
+      ),
     );
   }
 
   if (!args.lastHumanMessage) {
-    return 'Continue the owner turn using the latest reviewer or arbiter feedback.';
+    return withActionHint(
+      'Continue the owner turn using the latest reviewer or arbiter feedback.',
+    );
   }
 
-  return `User request:\n---\n${args.lastHumanMessage}\n---\n\nContinue the owner turn using the latest reviewer or arbiter feedback.`;
+  return withActionHint(
+    `User request:\n---\n${args.lastHumanMessage}\n---\n\nContinue the owner turn using the latest reviewer or arbiter feedback.`,
+  );
 }
 
 export function buildArbiterPromptForTask(args: {

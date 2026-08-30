@@ -1,4 +1,5 @@
 import type { VisibleVerdict } from './paired-verdict.js';
+import type { OwnerRequiredAction } from './paired-owner-action.js';
 
 export type CompletionSignal =
   | { kind: 'request_reviewer'; resetStatusToActive: boolean }
@@ -12,6 +13,9 @@ export function resolveOwnerCompletionSignal(args: {
   phase: 'normal' | 'finalize';
   visibleVerdict: VisibleVerdict;
   hasChangesSinceApproval?: boolean | null;
+  hasChangesThisTurn?: boolean | null;
+  requiredAction?: OwnerRequiredAction;
+  evidenceConsistent?: boolean;
   roundTripCount?: number;
   deadlockThreshold?: number;
 }): CompletionSignal {
@@ -19,6 +23,9 @@ export function resolveOwnerCompletionSignal(args: {
     phase,
     visibleVerdict,
     hasChangesSinceApproval = false,
+    hasChangesThisTurn = null,
+    requiredAction = 'unspecified',
+    evidenceConsistent = true,
     roundTripCount = 0,
     deadlockThreshold = Number.POSITIVE_INFINITY,
   } = args;
@@ -28,6 +35,12 @@ export function resolveOwnerCompletionSignal(args: {
   }
 
   if (phase === 'normal') {
+    if (
+      evidenceConsistent === false ||
+      (requiredAction === 'file-edit' && hasChangesThisTurn === false)
+    ) {
+      return { kind: 'request_owner_changes' };
+    }
     return {
       kind: 'request_reviewer',
       resetStatusToActive: false,

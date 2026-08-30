@@ -754,6 +754,104 @@ describe('paired execution context owner completion handling', () => {
       }),
     );
   });
+
+  it('keeps a missing required file edit in the owner loop', () => {
+    const repoDir = createCanonicalRepoWithCommit('owner evidence baseline');
+    const sourceRef = resolveTreeRef(repoDir);
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'active',
+        work_dir: repoDir,
+        source_ref: sourceRef,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'owner',
+      status: 'succeeded',
+      summary: 'TASK_DONE\n상태: 검증만 완료',
+      ownerRequiredAction: 'file-edit',
+      ownerTurnSourceRef: sourceRef,
+      ownerEvidenceRejectionReason:
+        'Required file-edit action completed without a worktree change.',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        owner_failure_count: 1,
+        empty_step_done_streak: 1,
+      }),
+    );
+    expect(db.updatePairedTask).not.toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ status: 'review_ready' }),
+    );
+  });
+
+  it('requests arbiter after repeated owner evidence failures', () => {
+    vi.spyOn(config, 'isArbiterEnabled').mockReturnValue(true);
+    const repoDir = createCanonicalRepoWithCommit('owner evidence repeat');
+    const sourceRef = resolveTreeRef(repoDir);
+    vi.mocked(db.getPairedTaskById).mockReturnValue(
+      buildPairedTask({
+        status: 'active',
+        work_dir: repoDir,
+        source_ref: sourceRef,
+        owner_failure_count: 1,
+      }),
+    );
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'owner',
+      status: 'succeeded',
+      summary: 'TASK_DONE\n상태: 다시 검증만 완료',
+      ownerRequiredAction: 'file-edit',
+      ownerTurnSourceRef: sourceRef,
+      ownerEvidenceRejectionReason:
+        'Required file-edit action completed without a worktree change.',
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'arbiter_requested',
+        owner_failure_count: 2,
+        arbiter_requested_at: expect.any(String),
+      }),
+    );
+  });
+
+  it('requests review after the required file edit changes the worktree', () => {
+    const repoDir = createCanonicalRepoWithCommit('owner evidence changed');
+    const sourceRef = resolveTreeRef(repoDir);
+    const task = buildPairedTask({
+      status: 'active',
+      work_dir: repoDir,
+      source_ref: sourceRef,
+    });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), 'implemented\n');
+    vi.mocked(db.getPairedTaskById)
+      .mockReturnValueOnce(task)
+      .mockReturnValueOnce({ ...task, status: 'review_ready' })
+      .mockReturnValue({ ...task, status: 'review_ready' });
+
+    completePairedExecutionContext({
+      taskId: 'task-1',
+      role: 'owner',
+      status: 'succeeded',
+      summary: 'TASK_DONE\n상태: 구현 완료',
+      ownerRequiredAction: 'file-edit',
+      ownerTurnSourceRef: sourceRef,
+    });
+
+    expect(db.updatePairedTask).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ status: 'review_ready' }),
+    );
+  });
 });
 
 describe('paired execution context STEP_DONE deadlock handling', () => {

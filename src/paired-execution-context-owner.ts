@@ -29,6 +29,7 @@ import {
   parseChecklistPlanNotes,
   serializeChecklistPlan,
 } from './checklist-continuation.js';
+import type { OwnerRequiredAction } from './paired-owner-action.js';
 import type { PairedTask } from './types.js';
 
 type OwnerFinalizeOutcome = 'stop' | 're_review';
@@ -614,6 +615,9 @@ export function handleOwnerCompletion(args: {
   task: PairedTask;
   taskId: string;
   summary?: string | null;
+  requiredAction?: OwnerRequiredAction;
+  turnSourceRef?: string | null;
+  evidenceRejectionReason?: string | null;
 }): void {
   const { task, taskId, summary } = args;
   const now = new Date().toISOString();
@@ -644,6 +648,12 @@ export function handleOwnerCompletion(args: {
     resolveDirectWorkDir(task.work_dir),
     task.source_ref,
   );
+  const hasChangesThisTurn = args.turnSourceRef
+    ? hasCodeChangesSinceRef(
+        resolveDirectWorkDir(task.work_dir),
+        args.turnSourceRef,
+      )
+    : null;
   const nextOwnerStepDoneStreak =
     ownerVerdict === 'step_done' ? (task.owner_step_done_streak ?? 0) + 1 : 0;
   const nextEmptyStepDoneStreak =
@@ -653,6 +663,9 @@ export function handleOwnerCompletion(args: {
   const signal = resolveOwnerCompletionSignal({
     phase: 'normal',
     visibleVerdict: ownerVerdict,
+    requiredAction: args.requiredAction,
+    hasChangesThisTurn,
+    evidenceConsistent: !args.evidenceRejectionReason,
   });
 
   if (signal.kind === 'request_arbiter') {
@@ -675,6 +688,58 @@ export function handleOwnerCompletion(args: {
         owner_step_done_streak: nextOwnerStepDoneStreak,
       },
     });
+    return;
+  }
+
+  if (signal.kind === 'request_owner_changes') {
+    const nextEvidenceFailureCount = (task.owner_failure_count ?? 0) + 1;
+    const nextEvidenceFailureStreak = (task.empty_step_done_streak ?? 0) + 1;
+    const patch = {
+      ...progressPatch,
+      owner_failure_count: nextEvidenceFailureCount,
+      owner_step_done_streak: nextOwnerStepDoneStreak,
+      empty_step_done_streak: nextEvidenceFailureStreak,
+    };
+    if (nextEvidenceFailureCount >= OWNER_FAILURE_ESCALATION_THRESHOLD) {
+      requestArbiterOrEscalate({
+        taskId,
+        currentStatus: task.status,
+        expectedUpdatedAt: task.updated_at,
+        now,
+        arbiterLogMessage:
+          'Owner repeatedly completed a required action without matching Git evidence — requesting arbiter',
+        escalateLogMessage:
+          'Owner repeatedly completed a required action without matching Git evidence — escalating to user',
+        logContext: {
+          taskId,
+          ownerVerdict,
+          requiredAction: args.requiredAction ?? 'unspecified',
+          hasChangesThisTurn,
+          evidenceRejectionReason: args.evidenceRejectionReason ?? null,
+          ownerFailureCount: nextEvidenceFailureCount,
+        },
+        patch,
+      });
+      return;
+    }
+
+    applyPairedTaskPatch({
+      taskId,
+      expectedUpdatedAt: task.updated_at,
+      updatedAt: now,
+      patch,
+    });
+    logger.warn(
+      {
+        taskId,
+        ownerVerdict,
+        requiredAction: args.requiredAction ?? 'unspecified',
+        hasChangesThisTurn,
+        evidenceRejectionReason: args.evidenceRejectionReason ?? null,
+        ownerFailureCount: nextEvidenceFailureCount,
+      },
+      'Rejected owner completion because required action evidence was missing or contradictory',
+    );
     return;
   }
 

@@ -47,6 +47,10 @@ import {
   transitionPairedTaskStatus,
 } from './paired-task-status.js';
 import { resolveCanonicalSourceRef } from './paired-source-ref.js';
+import {
+  resolveOwnerRequiredAction,
+  type OwnerRequiredAction,
+} from './paired-owner-action.js';
 import { parkRetryablePairedFailure } from './paired-retry-policy.js';
 import { resolvePairedSupervisorState } from './paired-supervisor-state.js';
 import {
@@ -429,6 +433,9 @@ export interface PreparedPairedExecutionContext {
   envOverrides: Record<string, string>;
   gateTurnKind?: string | null;
   requiresVisibleVerdict?: boolean;
+  ownerRequiredAction?: OwnerRequiredAction;
+  ownerTurnSourceRef?: string | null;
+  ownerTaskSourceRef?: string | null;
   blockMessage?: string;
 }
 
@@ -684,6 +691,14 @@ export function preparePairedExecutionContext(args: {
     roomRoleContext,
     workDir,
   });
+  const ownerRequiredAction =
+    roomRoleContext.role === 'owner'
+      ? resolveOwnerRequiredAction(getPairedTurnOutputs(task.id))
+      : undefined;
+  const ownerTurnSourceRef =
+    roomRoleContext.role === 'owner'
+      ? resolveCanonicalSourceRef(workDir)
+      : undefined;
 
   return {
     task: getPairedTaskById(task.id) ?? task,
@@ -692,6 +707,10 @@ export function preparePairedExecutionContext(args: {
     envOverrides,
     requiresVisibleVerdict:
       roomRoleContext.role === 'reviewer' || roomRoleContext.role === 'arbiter',
+    ownerRequiredAction,
+    ownerTurnSourceRef,
+    ownerTaskSourceRef:
+      roomRoleContext.role === 'owner' ? latestTask.source_ref : undefined,
     blockMessage,
   };
 }
@@ -702,6 +721,10 @@ type CompletePairedExecutionContextArgs = {
   status: 'succeeded' | 'failed';
   runId?: string;
   summary?: string | null;
+  ownerRequiredAction?: OwnerRequiredAction;
+  ownerTurnSourceRef?: string | null;
+  ownerTaskSourceRef?: string | null;
+  ownerEvidenceRejectionReason?: string | null;
   arbiterDirective?: import('./types.js').ArbiterDirective;
   protocolError?: 'arbiter-verdict-mismatch';
 };
@@ -786,7 +809,14 @@ function completePairedExecutionContextBody(
 
   if (role === 'owner') {
     resolveDirectWorkDir(task.work_dir);
-    handleOwnerCompletion({ task, taskId, summary: args.summary });
+    handleOwnerCompletion({
+      task,
+      taskId,
+      summary: args.summary,
+      requiredAction: args.ownerRequiredAction,
+      turnSourceRef: args.ownerTurnSourceRef,
+      evidenceRejectionReason: args.ownerEvidenceRejectionReason,
+    });
     return;
   }
 

@@ -31,6 +31,14 @@ export function resolvePairedFollowUpQueueAction(args: {
   ownerFailureCount?: number | null;
 }): PairedFollowUpQueueAction {
   if (
+    args.completedRole === 'owner' &&
+    args.taskStatus === 'active' &&
+    (args.ownerFailureCount ?? 0) > 0
+  ) {
+    return 'pending';
+  }
+
+  if (
     args.executionStatus === 'failed' &&
     args.sawOutput === false &&
     isSilentCodexAccountFailure(args.outputSummary)
@@ -61,6 +69,7 @@ export function resolvePairedFollowUpQueueAction(args: {
       args.sawOutput && args.outputSummary
         ? parseVisibleVerdict(args.outputSummary)
         : null,
+    ownerFailureCount: args.ownerFailureCount,
   });
   const dispatch = resolveFollowUpDispatch({
     source: 'executor-recovery',

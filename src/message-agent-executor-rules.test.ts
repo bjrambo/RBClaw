@@ -265,6 +265,19 @@ describe('message-agent-executor-rules', () => {
     ).toBe('none');
   });
 
+  it('requeues an owner completion rejected by the evidence gate', () => {
+    expect(
+      resolvePairedFollowUpQueueAction({
+        completedRole: 'owner',
+        executionStatus: 'succeeded',
+        sawOutput: true,
+        taskStatus: 'active',
+        outputSummary: 'TASK_DONE\n상태: 구현 완료',
+        ownerFailureCount: 1,
+      }),
+    ).toBe('pending');
+  });
+
   it('returns none after successful output when no next-turn action is needed', () => {
     expect(
       resolvePairedFollowUpQueueAction({

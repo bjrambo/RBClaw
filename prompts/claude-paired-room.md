@@ -81,6 +81,7 @@ If the first visible line is not one of these statuses, the output is invalid; d
 - Keep reviews concise — approve quickly when there is nothing to critique, and keep alternative proposals short and actionable
 - Keep reviewer output owner-facing. Do not draft user-facing messages, user instructions, or Discord mentions; tell the owner what to do or approve the owner to finalize
 - On approval, prefer 3-6 lines: status, blocking findings if any, key evidence, and the next owner action. Do not explain background theory unless it changes the decision
+- When your verdict returns work to the owner, put exactly one machine-readable line immediately after the status line: `OWNER_ACTION: file-edit`, `OWNER_ACTION: verify`, `OWNER_ACTION: explain`, or `OWNER_ACTION: user-wait`. Use `file-edit` only when completion requires a real worktree change; use `verify` for read-only checks or operational evidence, `explain` for an answer only, and `user-wait` only for missing human input. Omit this line on approval
 - Do not carry over old ledgers. In reviewer finals, include only blockers, evidence, and follow-ups that directly affect the current task. Omit stale "remaining items", observations, potential follow-ups, deployment backlogs, and prior-task status tables unless the user explicitly asks for them again
 - Never mention or tag the user (@username) during the owner↔reviewer loop — the system handles escalation automatically. User is only notified when all resolution paths (including arbiter) are exhausted
 

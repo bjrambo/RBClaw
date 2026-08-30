@@ -39,6 +39,7 @@ import {
   buildChecklistContinuationPrompt,
   hasChecklistContinuation,
 } from './checklist-continuation.js';
+import { resolveOwnerRequiredAction } from './paired-owner-action.js';
 
 export type PendingPairedTurn = {
   prompt: string;
@@ -226,6 +227,7 @@ export function buildPendingPairedTurn(args: {
       ),
       lastHumanMessage,
       taskCreatedAt: task.created_at,
+      requiredAction: resolveOwnerRequiredAction(turnOutputs),
     });
     return {
       prompt: checklistPrompt

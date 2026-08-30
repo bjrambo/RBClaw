@@ -292,6 +292,37 @@ describe('message-runtime-prompts output-only context', () => {
     expect(prompt).toContain('현재 reviewer 피드백');
     expect(prompt).not.toContain('이전 작업의 사용자 메시지');
   });
+
+  it('adds only the current conditional owner action to follow-up prompts', () => {
+    const fileEditPrompt = buildOwnerPendingPrompt({
+      chatJid: 'group@test',
+      timezone: 'UTC',
+      turnOutputs: [
+        makeTurnOutput(
+          'STEP_DONE\nOWNER_ACTION: file-edit\n실제 수정을 진행해라.',
+          'reviewer',
+        ),
+      ],
+      recentHumanMessages: [],
+      lastHumanMessage: null,
+      requiredAction: 'file-edit',
+    });
+    const unspecifiedPrompt = buildOwnerPendingPrompt({
+      chatJid: 'group@test',
+      timezone: 'UTC',
+      turnOutputs: [],
+      recentHumanMessages: [],
+      lastHumanMessage: null,
+    });
+
+    expect(fileEditPrompt).toContain(
+      'Current required owner action: file-edit.',
+    );
+    expect(fileEditPrompt).toContain(
+      'analysis or verification alone does not complete this turn',
+    );
+    expect(unspecifiedPrompt).not.toContain('Current required owner action:');
+  });
 });
 
 describe('message-runtime-prompts arbiter output context', () => {
