@@ -1211,3 +1211,81 @@ describe('MessageTurnController human interruptions', () => {
     expect(deliverFinalText).not.toHaveBeenCalled();
   });
 });
+
+describe('MessageTurnController terminal progress synchronization', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('stops periodic progress edits before awaiting a pending owner progress flush', async () => {
+    vi.useFakeTimers();
+    const channel = { ...makeChannel(), name: 'discord' } satisfies Channel;
+    const deliverFinalText = vi.fn().mockResolvedValue(true);
+    let resolveSlowEdit!: () => void;
+    vi.mocked(channel.editMessage!)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSlowEdit = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const controller = new MessageTurnController({
+      chatJid: 'dc:test-room',
+      group: makeGroup(),
+      runId: 'run-owner-slow-progress-edit',
+      channel,
+      idleTimeout: 20_000,
+      failureFinalText: '실패',
+      isClaudeCodeAgent: false,
+      clearSession: vi.fn(),
+      requestClose: vi.fn(),
+      deliverFinalText,
+      deliveryRole: 'owner',
+      pairedTurnIdentity: {
+        turnId: 'task-1:2026-04-10T14:22:00.000Z:owner-turn',
+        taskId: 'task-1',
+        taskUpdatedAt: '2026-04-10T14:22:00.000Z',
+        intentKind: 'owner-turn',
+        role: 'owner',
+      },
+    });
+
+    try {
+      await controller.start();
+      await controller.handleOutput({
+        status: 'success',
+        phase: 'progress',
+        result: '첫 진행 상황',
+      } as any);
+      await controller.handleOutput({
+        status: 'success',
+        phase: 'progress',
+        result: '최종 직전 진행 상황',
+      } as any);
+      await flushMicrotasks();
+
+      const finalDelivery = controller.handleOutput({
+        status: 'success',
+        phase: 'final',
+        result: '최종 답변',
+      } as any);
+      await flushMicrotasks();
+
+      expect(channel.editMessage).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(channel.editMessage).toHaveBeenCalledTimes(1);
+
+      resolveSlowEdit();
+      await finalDelivery;
+
+      expect(channel.editMessage).toHaveBeenCalledTimes(1);
+      expect(deliverFinalText).toHaveBeenCalledWith('최종 답변', {
+        replaceMessageId: 'progress-1',
+      });
+    } finally {
+      await controller.finish('success');
+      vi.useRealTimers();
+    }
+  });
+});

@@ -634,11 +634,12 @@ export class MessageTurnController {
       flushPendingText?: string | null;
     },
   ): Promise<void> {
+    this.progressEdits.stop();
+    this.progressEdits.cancelPending();
     if (options?.flushPendingText) {
       await this.flushPendingProgress(options.flushPendingText);
     }
 
-    this.progressEdits.stop();
     this.progressEdits.cancelPending();
     await this.progressEdits.waitForIdle();
 
