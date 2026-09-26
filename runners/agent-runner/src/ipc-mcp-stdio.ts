@@ -71,7 +71,7 @@ function writeIpcFile(dir: string, data: object): string {
 
 const server = new McpServer({
   name: 'rbclaw',
-  version: '1.0.0',
+  version: '1.1.0',
 });
 
 server.tool(

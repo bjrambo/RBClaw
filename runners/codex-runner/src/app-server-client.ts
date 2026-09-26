@@ -244,7 +244,7 @@ export class CodexAppServerClient {
       clientInfo: {
         name: 'rbclaw_codex_runner',
         title: 'RBClaw Codex Runner',
-        version: '1.0.0',
+        version: '1.1.0',
       },
       capabilities: {
         experimentalApi: true,

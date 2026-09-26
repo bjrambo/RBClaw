@@ -43,7 +43,7 @@
     },
     "runners/agent-runner": {
       "name": "rbclaw-agent-runner",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.153",
         "@anthropic-ai/sdk": "0.100.0",
@@ -59,7 +59,7 @@
     },
     "runners/codex-runner": {
       "name": "rbclaw-codex-runner",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
         "@openai/codex": "0.154.0",
         "rbclaw-runners-shared": "workspace:*",
@@ -71,7 +71,7 @@
     },
     "runners/shared": {
       "name": "rbclaw-runners-shared",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "devDependencies": {
         "@types/node": "^22.10.7",
         "typescript": "^5.7.3",

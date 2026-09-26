@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-27
+
+### Added
+
+- owner가 수행해야 할 현재 행동을 구조화하고 실제 파일 변경 증거와 완료 보고를 교차 검증하는 action evidence gate 추가
+- 최종 승인 뒤 변경이 발생하면 reviewer가 다시 확인하도록 하는 final review phase 추가
+- Rhymix 개발용 `rx-docs` 참조 문서와 검증 스크립트를 번들 skill로 추가
+
+### Changed
+
+- paired task의 사용자 승인 범위와 owner / reviewer / arbiter 후속 행동 전달을 명시적으로 관리하도록 실행 흐름 정비
+- Rhymix skill 참조 문서를 `rx-docs` 단일 구조로 통합
+- Codex app-server runner를 `@openai/codex@0.154.0`으로 갱신
+
+### Fixed
+
+- 종료된 agent의 자식 프로세스가 남거나 최종 출력 뒤 정리 단계가 멈추던 문제 수정
+- Discord 채널 연결의 일시적 실패를 재시도하도록 개선
+- 중재자 구조화 출력 뒤의 `OWNER_ACTION` 때문에 JSON이 노출되고 중재자가 중복 호출되던 문제 수정
+- 느린 진행 메시지 편집 때문에 owner / reviewer 역할 전환이 멈추던 문제 수정
+- reviewer 최종 승인 전에 task가 완료되거나 구현 증거 없이 다음 단계로 넘어가던 문제 수정
+
 ## [1.0.0] - 2026-08-06
 
 ### Changed
