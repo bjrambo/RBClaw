@@ -53,10 +53,11 @@ describe('codex app-server display event routing', () => {
     });
     notify('item/started', {
       type: 'commandExecution',
-      command: 'secret command',
+      command: 'bun run test --token secret-token',
     });
     notify('item/completed', {
       type: 'commandExecution',
+      command: 'bun run test --token secret-token',
       exitCode: 0,
       aggregatedOutput: 'secret stdout',
     });
@@ -88,8 +89,8 @@ describe('codex app-server display event routing', () => {
 
     expect(onProgress.mock.calls).toEqual([['첫 공개 진행 문구']]);
     expect(onToolActivity.mock.calls).toEqual([
-      ['🔄 명령 실행 시작'],
-      ['✅ 명령 실행 완료'],
+      ['🔄 명령 실행 시작 · `bun run test …`'],
+      ['✅ 명령 실행 완료 · `bun run test …`'],
     ]);
     expect((await turn.wait()).result).toBe('TASK_DONE 최종 결과');
   });

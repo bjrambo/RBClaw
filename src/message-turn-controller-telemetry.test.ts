@@ -95,6 +95,31 @@ describe('display-only progress and tool telemetry', () => {
     expect(deliverFinalText).not.toHaveBeenCalled();
   });
 
+  it('keeps safe command summaries display-only and sends only the authoritative final', async () => {
+    const { channel, controller, deliverFinalText } = fixture();
+    const summary = '🔄 명령 실행 시작 · `bun run test …`';
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'tool-activity',
+      result: summary,
+    });
+    expect(channel.sendAndTrack).toHaveBeenCalledWith(
+      'dc:test',
+      expect.stringContaining(summary),
+    );
+    expect(deliverFinalText).not.toHaveBeenCalled();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'final',
+      result: 'TASK_DONE 실제 결과',
+    });
+    await controller.finish('success');
+    expect(deliverFinalText).toHaveBeenCalledTimes(1);
+    expect(deliverFinalText).toHaveBeenCalledWith('TASK_DONE 실제 결과', {
+      replaceMessageId: 'progress-1',
+    });
+  });
+
   it('shows the first action immediately, then coalesces tool updates within one second', async () => {
     vi.useFakeTimers();
     const { channel, controller, deliverFinalText } = fixture();

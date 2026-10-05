@@ -1,3 +1,5 @@
+import { summarizeToolActivity } from './app-server-tool-summary.js';
+
 const TOOL_LABELS: Readonly<Record<string, string>> = {
   commandExecution: '명령 실행',
   fileChange: '파일 변경',
@@ -11,7 +13,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   sleep: '대기',
 };
 
-/** Display metadata only. Never copy commands, arguments, results or reasoning. */
+/** Display safe summaries only. Never copy raw arguments, results or reasoning. */
 export function formatAppServerToolActivity(
   method: string,
   item: Record<string, unknown> | null | undefined,
@@ -22,11 +24,13 @@ export function formatAppServerToolActivity(
     ? TOOL_LABELS[item.type]
     : undefined;
   if (!label) return null;
+  const summary = summarizeToolActivity(item);
+  const detail = summary ? ` · ${summary}` : '';
 
-  if (method === 'item/started') return `🔄 ${label} 시작`;
-  if (item.status === 'declined') return `⛔ ${label} 거부됨`;
+  if (method === 'item/started') return `🔄 ${label} 시작${detail}`;
+  if (item.status === 'declined') return `⛔ ${label} 거부됨${detail}`;
   if (item.status === 'cancelled' || item.status === 'interrupted') {
-    return `⏹ ${label} 중단됨`;
+    return `⏹ ${label} 중단됨${detail}`;
   }
   if (
     item.status === 'failed' ||
@@ -36,7 +40,7 @@ export function formatAppServerToolActivity(
     item.failure != null ||
     (item.result as { isError?: unknown } | null | undefined)?.isError === true
   ) {
-    return `❌ ${label} 실패`;
+    return `❌ ${label} 실패${detail}`;
   }
-  return `✅ ${label} 완료`;
+  return `✅ ${label} 완료${detail}`;
 }
