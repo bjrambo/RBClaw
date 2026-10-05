@@ -4,6 +4,10 @@ export {
 } from './room-role-context.js';
 export { RBCLAW_ENV, type RbclawEnvName } from './rbclaw-env.js';
 export {
+  summarizeCommand,
+  summarizeToolActivity,
+} from './tool-activity-summary.js';
+export {
   isPairedRoomRole,
   normalizePairedRoomRole,
   normalizePairedRoomRoleOrNull,

@@ -3,6 +3,7 @@ import { RBCLAW_ENV, IPC_POLL_MS } from 'rbclaw-runners-shared';
 
 import { compactBoundaryFromMessage } from './compaction-boundary.js';
 import { getClaudeCliPath } from './claude-cli.js';
+import { ClaudeToolActivity } from './claude-tool-activity.js';
 import type { ClaudeCompatibleAgentType } from './bundled-cli-path.js';
 import { drainIpcInput, shouldClose } from './ipc-input.js';
 import { buildRbclawMcpServerConfig } from './mcp-config.js';
@@ -69,7 +70,15 @@ class ClaudeQueryRunner {
   private messageCount = 0;
   private resultCount = 0;
   private terminalResultObserved = false;
-  private pendingProgressText: string | null = null;
+  private readonly toolActivity = new ClaudeToolActivity((text) => {
+    if (this.terminalResultObserved || this.closedDuringQuery) return;
+    writeOutput({
+      status: 'success',
+      phase: 'tool-activity',
+      result: text,
+      newSessionId: this.newSessionId,
+    });
+  });
   private compaction: RunnerCompaction | undefined;
 
   constructor(private readonly args: RunClaudeQueryArgs) {
@@ -103,7 +112,18 @@ class ClaudeQueryRunner {
       if (this.handleMessage(message)) break;
     }
 
-    this.flushRemainingPendingText();
+    if (!this.terminalResultObserved && !this.closedDuringQuery) {
+      // A missing terminal event is an error, not permission to turn commentary
+      // into a canonical owner/reviewer report.
+      writeOutput({
+        status: 'error',
+        phase: 'final',
+        result: null,
+        newSessionId: this.newSessionId,
+        error: 'Claude SDK stream ended without a terminal result.',
+      });
+      this.terminalResultObserved = true;
+    }
     this.ipcPolling = false;
     this.args.log(
       `Query done. Messages: ${this.messageCount}, results: ${this.resultCount}, closedDuringQuery: ${this.closedDuringQuery}`,
@@ -140,19 +160,6 @@ class ClaudeQueryRunner {
 
   private handleCloseSentinel(): void {
     this.args.log('Close sentinel detected during query, ending stream');
-    if (this.pendingProgressText && !this.terminalResultObserved) {
-      this.args.log(
-        `Flushing pending text before close (${this.pendingProgressText.length} chars)`,
-      );
-      writeOutput({
-        status: 'success',
-        ...normalizeStructuredOutput(this.pendingProgressText),
-        newSessionId: this.newSessionId,
-      });
-      this.pendingProgressText = null;
-      this.terminalResultObserved = true;
-      this.resultCount++;
-    }
     this.closedDuringQuery = true;
     this.stream.end();
     this.ipcPolling = false;
@@ -219,6 +226,7 @@ class ClaudeQueryRunner {
           },
         ],
         PreToolUse: [
+          { hooks: [this.toolActivity.preToolUse] },
           {
             matcher: 'Bash',
             hooks: readonlyReviewerRuntime
@@ -226,6 +234,8 @@ class ClaudeQueryRunner {
               : [createSanitizeBashHook()],
           },
         ],
+        PostToolUse: [{ hooks: [this.toolActivity.postToolUse] }],
+        PostToolUseFailure: [{ hooks: [this.toolActivity.postToolUseFailure] }],
       },
       agentProgressSummaries: true,
     };
@@ -333,9 +343,6 @@ class ClaudeQueryRunner {
 
   private handleMessage(message: unknown): boolean {
     const type = (message as { type?: string }).type;
-    if (type !== 'assistant' && this.pendingProgressText) {
-      this.flushPendingProgressAsIntermediate();
-    }
     if (type === 'system') this.handleSystemMessage(message);
     if (type === 'tool_progress') this.handleToolProgress(message);
     if (type === 'tool_use_summary') this.handleToolUseSummary(message);
@@ -406,29 +413,30 @@ class ClaudeQueryRunner {
   }
 
   private handleToolProgress(message: unknown): void {
-    const tp = message as {
-      tool_name: string;
-      elapsed_time_seconds: number;
-    };
-    const label = `${tp.tool_name} (${Math.round(tp.elapsed_time_seconds)}s)`;
+    const label = this.toolActivity.progress(
+      message as {
+        tool_use_id?: unknown;
+        tool_name?: unknown;
+        elapsed_time_seconds?: unknown;
+      },
+    );
+    if (!label) return;
     this.args.log(`Tool progress: ${label}`);
     writeOutput({
       status: 'success',
-      phase: 'progress',
+      phase: 'tool-activity',
       ...normalizeStructuredOutput(label),
       newSessionId: this.newSessionId,
     });
   }
 
   private handleToolUseSummary(message: unknown): void {
-    const ts = message as { summary: string };
-    this.args.log(`Tool use summary: ${ts.summary.slice(0, 200)}`);
-    writeOutput({
-      status: 'success',
-      phase: 'progress',
-      ...normalizeStructuredOutput(ts.summary),
-      newSessionId: this.newSessionId,
-    });
+    void message;
+    // Free-form SDK summaries can quote arguments/output. Safe hook telemetry
+    // already describes the actions without exposing those values.
+    this.args.log(
+      'Skipped free-form tool use summary; using safe lifecycle telemetry',
+    );
   }
 
   private handleResultMessage(message: unknown): boolean {
@@ -442,28 +450,8 @@ class ClaudeQueryRunner {
       session_id?: unknown;
     };
     this.resultCount++;
-    let textResult = resultMessage.result || null;
+    const textResult = resultMessage.result || null;
     const isError = resultMessage.subtype?.startsWith('error');
-
-    if (this.pendingProgressText && textResult === this.pendingProgressText) {
-      this.args.log('Discarding pending progress (matches result)');
-      this.pendingProgressText = null;
-    } else if (this.pendingProgressText) {
-      if (!textResult) {
-        this.args.log(
-          `Promoting pending progress text to result (${this.pendingProgressText.length} chars)`,
-        );
-        textResult = this.pendingProgressText;
-      } else {
-        writeOutput({
-          status: 'success',
-          phase: 'intermediate',
-          result: this.pendingProgressText,
-          newSessionId: this.newSessionId,
-        });
-      }
-      this.pendingProgressText = null;
-    }
 
     this.args.log(
       `Result #${this.resultCount}: subtype=${resultMessage.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
@@ -507,6 +495,7 @@ class ClaudeQueryRunner {
     );
     writeOutput({
       status: 'error',
+      phase: 'final',
       result: textResult || null,
       newSessionId: this.newSessionId,
       error:
@@ -520,6 +509,7 @@ class ClaudeQueryRunner {
   private writeSuccessResult(textResult: string | null): void {
     writeOutput({
       status: 'success',
+      phase: 'final',
       ...normalizeStructuredOutput(textResult || null),
       newSessionId: this.newSessionId,
       ...buildCompactionOutput(this.compaction),
@@ -528,7 +518,14 @@ class ClaudeQueryRunner {
 
   private handleAssistantMessage(message: unknown): boolean {
     this.trackedAgentTasks.rememberAssistantMessage(message);
-    const stopReason = (message as { stop_reason?: string }).stop_reason;
+    const assistant = message as {
+      stop_reason?: string;
+      parent_tool_use_id?: string | null;
+      message?: { stop_reason?: string | null };
+    };
+    // A nested agent's end_turn must never terminate the main query.
+    if (assistant.parent_tool_use_id) return false;
+    const stopReason = assistant.message?.stop_reason ?? assistant.stop_reason;
     const textResult = extractAssistantText(message);
     if (textResult || stopReason === 'end_turn') {
       this.args.log(
@@ -542,6 +539,7 @@ class ClaudeQueryRunner {
       );
       writeOutput({
         status: 'success',
+        phase: 'final',
         ...normalizeStructuredOutput(textResult),
         newSessionId: this.newSessionId,
         ...buildCompactionOutput(this.compaction),
@@ -552,39 +550,14 @@ class ClaudeQueryRunner {
       return true;
     }
     if (stopReason !== 'end_turn' && textResult) {
-      if (this.pendingProgressText) this.flushPendingProgressAsIntermediate();
-      this.pendingProgressText = textResult;
-      this.args.log(
-        `Intermediate assistant text buffered (${textResult.length} chars, stop=${stopReason})`,
-      );
+      writeOutput({
+        status: 'success',
+        phase: 'progress',
+        ...normalizeStructuredOutput(textResult),
+        newSessionId: this.newSessionId,
+      });
     }
     return false;
-  }
-
-  private flushPendingProgressAsIntermediate(): void {
-    if (!this.pendingProgressText) return;
-    writeOutput({
-      status: 'success',
-      phase: 'intermediate',
-      ...normalizeStructuredOutput(this.pendingProgressText),
-      newSessionId: this.newSessionId,
-    });
-    this.pendingProgressText = null;
-  }
-
-  private flushRemainingPendingText(): void {
-    if (!this.pendingProgressText || this.terminalResultObserved) return;
-    this.args.log(
-      `Flushing remaining pending progress text as final output (${this.pendingProgressText.length} chars)`,
-    );
-    writeOutput({
-      status: 'success',
-      ...normalizeStructuredOutput(this.pendingProgressText),
-      newSessionId: this.newSessionId,
-      ...buildCompactionOutput(this.compaction),
-    });
-    this.terminalResultObserved = true;
-    this.resultCount++;
   }
 }
 

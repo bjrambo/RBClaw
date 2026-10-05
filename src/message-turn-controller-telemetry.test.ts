@@ -16,7 +16,7 @@ import { renderProgressMessage } from './message-turn-controller-progress-render
 import { TASK_STATUS_MESSAGE_PREFIX } from './task-watch-status.js';
 import type { Channel } from './types.js';
 
-function fixture() {
+function fixture(agentType: 'codex' | 'claude-code' = 'codex') {
   const channel: Channel = {
     name: 'discord',
     connect: vi.fn(),
@@ -35,13 +35,13 @@ function fixture() {
       folder: 'test',
       trigger: '@bot',
       added_at: '',
-      agentType: 'codex',
+      agentType,
     },
     runId: 'run-1',
     channel,
     idleTimeout: 60_000,
     failureFinalText: '실패',
-    isClaudeCodeAgent: false,
+    isClaudeCodeAgent: agentType === 'claude-code',
     clearSession: vi.fn(),
     requestClose: vi.fn(),
     deliverFinalText,
@@ -62,6 +62,43 @@ afterEach(() => {
 });
 
 describe('display-only progress and tool telemetry', () => {
+  it('keeps Claude commentary/activity display-only until its authoritative final', async () => {
+    const { channel, controller, deliverFinalText } = fixture('claude-code');
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: 'Claude 첫 문구',
+    });
+    expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'tool-activity',
+      result: '🔄 파일 읽기 시작 · 읽기 `package.json`',
+    });
+    expect(deliverFinalText).not.toHaveBeenCalled();
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'final',
+      result: 'TASK_DONE Claude 정식 보고',
+    });
+    await controller.finish('success');
+    expect(deliverFinalText).toHaveBeenCalledTimes(1);
+    expect(deliverFinalText).toHaveBeenCalledWith(
+      'TASK_DONE Claude 정식 보고',
+      { replaceMessageId: 'progress-1' },
+    );
+  });
+
+  it('never replays Claude progress as a final on a paired turn', async () => {
+    const { controller, deliverFinalText } = fixture('claude-code');
+    await controller.handleOutput({
+      status: 'success',
+      phase: 'progress',
+      result: 'Claude 중간 문구',
+    });
+    await controller.finish('success');
+    expect(deliverFinalText).not.toHaveBeenCalled();
+  });
   it('preserves the newest actions within the Discord limit without truncating dashboard progress', () => {
     const persistProgressBody = vi.fn();
     const text = '긴 진행 문구'.repeat(500);

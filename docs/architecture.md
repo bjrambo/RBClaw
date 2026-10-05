@@ -62,6 +62,8 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
 - 첫 완성된 공개 진행 문구는 다음 agent 이벤트를 기다리지 않고 즉시 전송합니다. Codex의 token delta, plan, reasoning은 이 표시 경로로 스트리밍하지 않습니다.
 - Codex app-server의 허용된 도구 `item/started`와 `item/completed` 이벤트는 `tool-activity`로 전달합니다. 도구 종류와 시작·완료·실패·중단·거부 상태에 허용된 명령 접두어(예: `bun run test …`) 또는 안전한 파일명(예: `읽기 package.json`) 요약을 덧붙입니다. 임의 인자·환경변수 값·전체 경로·도구 결과·reasoning은 복사하지 않습니다.
 - `functions.exec` 같은 실행 묶음은 정적으로 읽을 수 있는 `tools.exec_command({cmd: "..."})` 호출만 요약합니다. 코드를 실행하거나 변수를 해석하지 않으며, 동적 문자열·spread·중복 cmd·지원하지 않는 문법은 일반 도구 표시로 남깁니다. 요약은 최대 3건·약 100자로 제한합니다.
+- Claude의 완성된 공개 assistant 문구도 즉시 `progress`로 전달합니다. `PreToolUse`·`PostToolUse`·`PostToolUseFailure`는 시작·완료·실패·중단을 `tool-activity`로 보내며, Codex와 같은 shared 안전 요약기를 사용합니다. 훅은 표시용 부수 출력만 내고 모델 입력에 `additionalContext`나 도구 결과를 추가하지 않습니다. 기존 Bash 시크릿 제거·리뷰어 읽기 전용 훅은 유지합니다.
+- Claude의 원시 tool_use/tool_result·자유 형식 tool_use_summary·reasoning은 표시 경로에 복사하지 않습니다. 정식 SDK result 또는 명시적 assistant end_turn만 최종으로 인정하며, 중간 문구는 스트림 종료·close·빈 결과에서 최종 답변으로 승격하지 않습니다. 정식 결과 없는 비정상 스트림 종료는 오류로 보고합니다.
 - 주 실행의 도구 활동은 최근 8건을 유지하고 1초 주기의 coalescing 편집으로 갱신합니다. 개별 활동마다 새 Discord 메시지를 만들지 않으며, 긴 진행 문구에서도 최신 활동이 Discord 길이 제한 안에 남도록 렌더링합니다.
 - 전달받은 활동 메타데이터는 scoped runtime log의 `Agent tool activity`로 기록합니다. 이는 도구 내부의 모든 마우스 동작이나 원시 실행 결과를 수집한다는 뜻은 아닙니다.
 - 초기 진행 메시지 전송과 최종 메시지 교체는 직렬화합니다. paired owner/reviewer/arbiter 턴은 최종 출력이 없더라도 진행 문구나 기본 heading을 최종 답변으로 재사용하지 않습니다.
@@ -70,6 +72,9 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
 
 구현 경계는 `runners/codex-runner/src/app-server-tool-activity.ts`,
 `runners/codex-runner/src/app-server-client.ts`,
+`runners/shared/src/tool-activity-summary.ts`,
+`runners/agent-runner/src/claude-tool-activity.ts`,
+`runners/agent-runner/src/claude-query-runner.ts`,
 `src/message-turn-controller.ts`, `src/message-runtime-prompts.ts`입니다.
 
 ## Tribunal 역할 분리
