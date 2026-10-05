@@ -57,6 +57,20 @@ Discord ──► SQLite (WAL) ──► GroupQueue ──┬──► Owner (ho
                     paired_turn_outputs            Discord display
 ```
 
+## 진행 표시와 교신 출력 분리
+
+- 첫 완성된 공개 진행 문구는 다음 agent 이벤트를 기다리지 않고 즉시 전송합니다. Codex의 token delta, plan, reasoning은 이 표시 경로로 스트리밍하지 않습니다.
+- Codex app-server의 허용된 도구 `item/started`와 `item/completed` 이벤트는 `tool-activity`로 전달합니다. 도구 종류와 시작·완료·실패·중단·거부 상태만 표시하며, 명령 원문·인자·도구 결과·reasoning은 복사하지 않습니다.
+- 주 실행의 도구 활동은 최근 8건을 유지하고 1초 주기의 coalescing 편집으로 갱신합니다. 개별 활동마다 새 Discord 메시지를 만들지 않으며, 긴 진행 문구에서도 최신 활동이 Discord 길이 제한 안에 남도록 렌더링합니다.
+- 전달받은 활동 메타데이터는 scoped runtime log의 `Agent tool activity`로 기록합니다. 이는 도구 내부의 모든 마우스 동작이나 원시 실행 결과를 수집한다는 뜻은 아닙니다.
+- 초기 진행 메시지 전송과 최종 메시지 교체는 직렬화합니다. paired owner/reviewer/arbiter 턴은 최종 출력이 없더라도 진행 문구나 기본 heading을 최종 답변으로 재사용하지 않습니다.
+- owner↔reviewer 교신은 canonical `paired_turn_outputs`와 현재 사용자 지시를 기준으로 구성합니다. canonical 출력이 없는 fallback에서도 task-status 표시 메시지는 프롬프트에서 제외합니다.
+- 이 경로는 진행 표시 지연을 줄입니다. 마우스 실행 속도, 사용자 추가 지시의 턴 전환, 메시지 폴링 주기 자체는 변경하지 않습니다.
+
+구현 경계는 `runners/codex-runner/src/app-server-tool-activity.ts`,
+`runners/codex-runner/src/app-server-client.ts`,
+`src/message-turn-controller.ts`, `src/message-runtime-prompts.ts`입니다.
+
 ## Tribunal 역할 분리
 
 | 역할     | 기본 선택                                     | 설명                                   |
@@ -137,6 +151,14 @@ chunk별로 사용합니다. native idempotency가 없는 Channel의 모호한 �
 - reviewer / arbiter가 직접 로컬 빌드를 못 돌려도, host verification 경로로 `typecheck`, `test`, `build`를 수행할 수 있음
 - startup precondition은 전용 오류로 올리고, `RestartPreventExitStatus=78`로 crash loop를 막음
 - deploy는 `migrate-room-registrations`를 선행한 뒤 service restart를 수행
+
+### 진행 표시 배포 확인 (2026-10-05)
+
+- 구현 커밋 `9756cdb`는 승인된 runtime/test 14파일만 포함하며, 개발 `main`과 GitHub `main`에 동일하게 반영했습니다. 기존 fixtures, 시크릿 백업, 임시 검증 자료는 커밋에서 제외했습니다.
+- 운영 `/home/qw5414/bot/EJClaw`은 기존 작업 보존을 위해 `feature/dotnet-runtime`의 HEAD `115bcc7`을 유지합니다. 적용된 14파일은 구현 커밋과 동일하지만, 운영 checkout은 기존 사용자 작업과 배포 파일을 포함한 의도된 미커밋 상태입니다. 운영 HEAD나 전체 트리가 원격 `main`과 같다는 뜻은 아닙니다.
+- 개발·운영 테스트 1,706개 통과·3개 건너뜀, 전체 runtime 빌드와 282개 source 파일의 dist freshness 검증을 통과했습니다. 재시작 후 서비스 `active/running`, `ExecMainStatus=0`과 compiled production 경로의 `RBCLAW_PROGRESS_LIVE_OK` 실호출을 확인했습니다.
+- 실호출의 표시 검증은 테스트 수신부를 사용했습니다. 재시작 후 owner↔reviewer 흐름은 정상 실행됐지만, 별도의 새 사용자 Discord 메시지 왕복 테스트와 실제 마우스 실행 속도 측정은 수행하지 않았습니다.
+- 운영의 다른 미커밋 작업을 정리하거나 전체 checkout을 reset하지 않습니다. 재배포·롤백 시에도 승인된 변경과 기존 사용자 작업을 구분하고, 배포 소스가 해당 구현 커밋과 일치하는지 확인해야 합니다.
 
 ## 주요 파일
 
