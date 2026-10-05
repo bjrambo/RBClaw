@@ -20,6 +20,81 @@ function buildClosableProcess(): ChildProcess {
   return proc;
 }
 
+describe('codex app-server display event routing', () => {
+  it('routes tool metadata separately from commentary and the authoritative final', async () => {
+    const client = new CodexAppServerClient({ cwd: '/repo', log: vi.fn() });
+    const internals = client as unknown as {
+      request: (method: string, params?: unknown) => Promise<unknown>;
+      handleNotification: (message: {
+        method: string;
+        params: Record<string, unknown>;
+      }) => void;
+    };
+    internals.request = vi.fn().mockResolvedValue({
+      turn: { id: 'turn-1', status: 'inProgress' },
+    });
+    const onProgress = vi.fn();
+    const onToolActivity = vi.fn();
+    const turn = await client.startTurn('thread-1', [], {
+      cwd: '/repo',
+      onProgress,
+      onToolActivity,
+    });
+    const notify = (method: string, item: Record<string, unknown>) =>
+      internals.handleNotification({
+        method,
+        params: { threadId: 'thread-1', turnId: 'turn-1', item },
+      });
+
+    notify('item/completed', {
+      type: 'agentMessage',
+      phase: 'commentary',
+      text: '첫 공개 진행 문구',
+    });
+    notify('item/started', {
+      type: 'commandExecution',
+      command: 'secret command',
+    });
+    notify('item/completed', {
+      type: 'commandExecution',
+      exitCode: 0,
+      aggregatedOutput: 'secret stdout',
+    });
+    notify('item/completed', { type: 'reasoning', text: 'private reasoning' });
+    internals.handleNotification({
+      method: 'item/started',
+      params: { threadId: 'other-thread', item: { type: 'mcpToolCall' } },
+    });
+    internals.handleNotification({
+      method: 'item/started',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'old-turn',
+        item: { type: 'mcpToolCall' },
+      },
+    });
+    notify('item/completed', {
+      type: 'agentMessage',
+      phase: 'final_answer',
+      text: 'TASK_DONE 최종 결과',
+    });
+    internals.handleNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed' },
+      },
+    });
+
+    expect(onProgress.mock.calls).toEqual([['첫 공개 진행 문구']]);
+    expect(onToolActivity.mock.calls).toEqual([
+      ['🔄 명령 실행 시작'],
+      ['✅ 명령 실행 완료'],
+    ]);
+    expect((await turn.wait()).result).toBe('TASK_DONE 최종 결과');
+  });
+});
+
 describe('codex app-server client goals', () => {
   it('does not enable goals by default when spawning app-server', () => {
     expect(

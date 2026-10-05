@@ -6,6 +6,8 @@ import {
 import { createRequire } from 'module';
 import path from 'path';
 
+import { formatAppServerToolActivity } from './app-server-tool-activity.js';
+
 import {
   createInitialAppServerTurnState,
   getAppServerTurnResult,
@@ -39,6 +41,7 @@ export interface CodexAppServerTurnOptions {
   model?: string;
   effort?: string;
   onProgress?: (message: string) => void;
+  onToolActivity?: (message: string) => void;
 }
 
 export interface CodexAppServerTurnResult {
@@ -122,6 +125,7 @@ interface ActiveTurn {
   threadId: string;
   state: AppServerTurnState;
   onProgress?: (message: string) => void;
+  onToolActivity?: (message: string) => void;
   resolve: (value: CodexAppServerTurnResult) => void;
   reject: (reason?: unknown) => void;
 }
@@ -313,6 +317,7 @@ export class CodexAppServerClient {
           threadId,
           state: createInitialAppServerTurnState(),
           onProgress: options.onProgress,
+          onToolActivity: options.onToolActivity,
           resolve,
           reject,
         };
@@ -487,11 +492,28 @@ export class CodexAppServerClient {
 
   private handleNotification(message: JsonRpcNotification): void {
     if (!this.activeTurn) return;
+    if (
+      typeof message.params?.threadId === 'string' &&
+      message.params.threadId !== this.activeTurn.threadId
+    ) {
+      return;
+    }
+
+    const item = message.params?.item as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    if (
+      typeof message.params?.turnId === 'string' &&
+      this.activeTurn.state.turnId &&
+      message.params.turnId !== this.activeTurn.state.turnId
+    ) {
+      return;
+    }
+    const activity = formatAppServerToolActivity(message.method, item);
+    if (activity) this.activeTurn.onToolActivity?.(activity);
 
     if (message.method === 'item/completed') {
-      const item =
-        (message.params?.item as Record<string, unknown> | undefined) ||
-        undefined;
       if (
         item?.type === 'agentMessage' &&
         item.phase !== 'final_answer' &&

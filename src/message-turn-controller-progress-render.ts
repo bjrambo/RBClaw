@@ -113,7 +113,22 @@ export function renderProgressMessage(args: {
   args.persistProgressBody(body);
 
   const maxBody = 2000 - TASK_STATUS_MESSAGE_PREFIX.length - suffix.length;
+  // A long commentary must not push the newest actions out of Discord's limit.
+  const activitySuffix =
+    args.subagents.size === 0 && args.toolActivities.length
+      ? composeProgressBody({ ...args, text: '' })
+      : '';
+  const visibleActivities =
+    activitySuffix.length >= maxBody
+      ? '…' + activitySuffix.slice(-(maxBody - 1))
+      : activitySuffix;
+  const textBudget = maxBody - visibleActivities.length;
+  const heading = activitySuffix ? args.text : body;
   const truncated =
-    body.length > maxBody ? body.slice(0, maxBody - 1) + '…' : body;
+    (heading.length > textBudget
+      ? textBudget > 0
+        ? heading.slice(0, textBudget - 1) + '…'
+        : ''
+      : heading) + visibleActivities;
   return `${TASK_STATUS_MESSAGE_PREFIX}${truncated}${suffix}`;
 }

@@ -7,6 +7,7 @@ import {
   type OwnerRequiredAction,
 } from './paired-owner-action.js';
 import { formatMessages } from './router.js';
+import { isTaskStatusControlMessage } from './task-watch-status.js';
 import type {
   NewMessage,
   OutboundAttachment,
@@ -189,7 +190,12 @@ export function buildPairedTurnPrompt(args: {
   turnOutputs: PairedTurnOutput[];
 }): string {
   if (args.turnOutputs.length === 0) {
-    return formatMessages(args.labeledFallbackMessages, args.timezone);
+    return formatMessages(
+      args.labeledFallbackMessages.filter(
+        (message) => !isTaskStatusControlMessage(message.content),
+      ),
+      args.timezone,
+    );
   }
 
   const humanMessages = args.missedMessages.filter(
