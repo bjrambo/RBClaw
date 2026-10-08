@@ -36,6 +36,7 @@ import {
   hasHumanMessageAfterWorkItem,
 } from './message-runtime-preflight-messages.js';
 import { deliverCanonicalOutboundMessage } from './ipc-outbound-delivery.js';
+import { extractSessionCommand } from './session-commands.js';
 import { findChannel, formatMessages } from './router.js';
 import { createScopedLogger, logger } from './logger.js';
 import type { AgentOutput } from './agent-runner.js';
@@ -273,9 +274,11 @@ async function processMissedMessages(
   runtime: RuntimeContext,
 ): Promise<boolean> {
   while (true) {
+    const sinceSeqCursor =
+      args.getLastAgentTimestamps()[runtime.chatJid] || '0';
     const rawMissedMessages = getMessagesSinceSeq(
       runtime.chatJid,
-      args.getLastAgentTimestamps()[runtime.chatJid] || '0',
+      sinceSeqCursor,
       args.assistantName,
     );
     const missedMessages = filterLoopingPairedBotMessages(
@@ -302,6 +305,13 @@ async function processMissedMessages(
       return pendingTurnOutcome;
     }
 
+    // A loop-side /stop may consume this snapshot while preflight yields.
+    if (
+      (args.getLastAgentTimestamps()[runtime.chatJid] || '0') !== sinceSeqCursor
+    ) {
+      continue;
+    }
+
     if (shouldSkipBotOnlyCollaboration(runtime.chatJid, missedMessages)) {
       advancePastBotOnlyCollaboration(args, runtime, missedMessages);
       return true;
@@ -310,6 +320,11 @@ async function processMissedMessages(
     const gateOutcome = await runQueuedRunGates(args, runtime, missedMessages);
     if (gateOutcome !== null) {
       return gateOutcome;
+    }
+    if (
+      (args.getLastAgentTimestamps()[runtime.chatJid] || '0') !== sinceSeqCursor
+    ) {
+      continue;
     }
 
     return runQueuedGroupTurn({
@@ -468,6 +483,25 @@ async function runQueuedRunGates(
       killProcess: () => args.queue.killProcess(runtime.chatJid),
     },
   });
+  if (
+    gateResult.handled &&
+    gateResult.success &&
+    missedMessages.some(
+      (message) =>
+        extractSessionCommand(message.content, args.triggerPattern) === '/stop',
+    )
+  ) {
+    const remaining = getProcessableMessages(
+      runtime.chatJid,
+      getMessagesSinceSeq(
+        runtime.chatJid,
+        args.getLastAgentTimestamps()[runtime.chatJid] || '0',
+        args.assistantName,
+      ),
+      runtime.channel,
+    );
+    if (remaining.length > 0) args.queue.enqueueMessageCheck(runtime.chatJid);
+  }
   return gateResult.handled ? gateResult.success : null;
 }
 

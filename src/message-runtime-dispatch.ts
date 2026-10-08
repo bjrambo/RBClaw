@@ -1,4 +1,5 @@
 import { logger } from './logger.js';
+import { normalizeStoredSeqCursor } from './message-cursor.js';
 import { getLatestOpenPairedTaskForChat, getMessagesSinceSeq } from './db.js';
 import {
   buildQueuedTurnDispatch,
@@ -302,8 +303,18 @@ export async function processLoopGroupMessages(args: {
   labelPairedSenders: (chatJid: string, messages: NewMessage[]) => NewMessage[];
   formatMessages: (messages: NewMessage[], timezone: string) => string;
 }): Promise<void> {
-  const { chatJid, group, groupMessages, channel } = args;
-  const isMainGroup = group.isMain === true;
+  const { chatJid, group, channel } = args;
+  const consumedSeq = Number(
+    normalizeStoredSeqCursor(args.lastAgentTimestamps[chatJid], chatJid),
+  );
+  // The queue may have consumed /stop before the poller observes it, or the
+  // same delivery may be seen again while its acknowledgement is in flight.
+  const groupMessages = args.groupMessages.filter(
+    (message) =>
+      extractSessionCommand(message.content, args.triggerPattern) !== '/stop' ||
+      message.seq == null ||
+      message.seq > consumedSeq,
+  );
   const processableGroupMessages = getProcessableMessages(
     chatJid,
     groupMessages,
@@ -341,7 +352,7 @@ export async function processLoopGroupMessages(args: {
     return;
   }
 
-  const loopCmdMsg = groupMessages.find(
+  const loopCmdMsg = processableGroupMessages.find(
     (msg) => extractSessionCommand(msg.content, args.triggerPattern) !== null,
   );
 
@@ -351,7 +362,7 @@ export async function processLoopGroupMessages(args: {
       args.triggerPattern,
     );
     const isAllowedSessionCommand = isSessionCommandAllowed(
-      isMainGroup,
+      group.isMain === true,
       loopCmdMsg.is_from_me === true,
       isSessionCommandSenderAllowed(loopCmdMsg.sender),
     );
@@ -364,6 +375,17 @@ export async function processLoopGroupMessages(args: {
         lastAgentTimestamps: args.lastAgentTimestamps,
         saveState: args.saveState,
       });
+      const commandIndex = processableGroupMessages.indexOf(loopCmdMsg);
+      const hasLaterMessage = processableGroupMessages
+        .slice(commandIndex + 1)
+        .some((message) =>
+          message.seq != null && loopCmdMsg.seq != null
+            ? message.seq > loopCmdMsg.seq
+            : message.id !== loopCmdMsg.id,
+        );
+      // The global poll cursor already covers the whole batch. Preserve its
+      // tail as a pending run before awaiting the acknowledgement.
+      if (hasLaterMessage) args.enqueueMessageCheck();
       await channel.sendMessage(
         chatJid,
         killed

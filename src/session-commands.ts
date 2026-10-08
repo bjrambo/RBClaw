@@ -5,6 +5,8 @@ import { formatOutbound } from './router.js';
 import type { StructuredAgentOutput } from './types.js';
 
 const SESSION_COMMAND_CONTROL_PATTERNS = [
+  /^Agent stopped\.$/,
+  /^No agent is currently running in this room\.$/,
   /^Current session cleared\. The next message will start a new conversation\.$/,
   /^Session commands require admin access\.$/,
   /^Failed to process messages before \/compact\. Try again\.$/,
@@ -70,7 +72,7 @@ export interface SessionCommandDeps {
   ) => Promise<'success' | 'error'>;
   closeStdin: () => void;
   clearSession: (opts?: { allRoles?: boolean }) => void;
-  advanceCursor: (timestamp: string) => void;
+  advanceCursor: (cursorOrTimestamp: string | number) => void;
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
   isAdminSender: (msg: NewMessage) => boolean;
   /** Whether the denied sender would normally be allowed to interact (for denial messages). */
@@ -157,7 +159,8 @@ export async function handleSessionCommand(opts: {
   if (command === '/stop') {
     const killed = deps.killProcess();
     deps.resetPairedTask?.();
-    deps.advanceCursor(cmdMsg.timestamp);
+    // Consume only this command, not later messages sharing its timestamp.
+    deps.advanceCursor(cmdMsg.seq ?? cmdMsg.timestamp);
     await deps.sendMessage(
       killed ? 'Agent stopped.' : 'No agent is currently running in this room.',
     );

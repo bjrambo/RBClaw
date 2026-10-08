@@ -20,6 +20,31 @@ function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
 const OWN_BOT_ID = 'my-bot-123';
 
 describe('filterProcessableMessages', () => {
+  it.each(['Agent stopped.', 'No agent is currently running in this room.'])(
+    'keeps the /stop notice out of paired prompts, without hiding a human quoting it: %s',
+    (notice) => {
+      const result = filterProcessableMessages(
+        [
+          makeMsg({
+            id: 'control',
+            sender: 'other-bot',
+            content: notice,
+            is_bot_message: true,
+          }),
+          makeMsg({ id: 'human', content: notice }),
+          makeMsg({
+            id: 'partner',
+            sender: 'other-bot',
+            content: 'normal reply',
+            is_bot_message: true,
+          }),
+        ],
+        true,
+      );
+      expect(result.map((message) => message.id)).toEqual(['human', 'partner']);
+    },
+  );
+
   it('filters bot-authored messages in normal rooms', () => {
     const result = filterProcessableMessages(
       [
