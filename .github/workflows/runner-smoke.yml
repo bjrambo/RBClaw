@@ -1,0 +1,37 @@
+name: Runner smoke (manual)
+
+# Never route pull-request CI to these persistent self-hosted machines.
+# Public-repository approval policy remains a separate security requirement.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  smoke:
+    if: >-
+      github.repository == 'bjrambo/RBClaw' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'bjrambo' &&
+      github.triggering_actor == 'bjrambo' &&
+      github.ref == 'refs/heads/main'
+    runs-on: rbclaw-runner-server-wsl-ij21s2i
+    timeout-minutes: 3
+    steps:
+      - name: Verify isolated Linux runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = runner-server-wsl
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          test "$(id -un)" = rbclaw-runner
+          case "$PWD" in
+            /home/rbclaw-runner/actions-runner/_work_linux/*) ;;
+            *) printf 'Unexpected runner work directory\n' >&2; exit 1 ;;
+          esac
+          printf 'Runner: %s | OS: %s | Architecture: %s\n' "$RUNNER_NAME" "$RUNNER_OS" "$RUNNER_ARCH"
+          hostname
+          id
+          uname -r
+          printf 'RBCLAW_RUNNER_SMOKE_OK\n'
