@@ -35,3 +35,33 @@ jobs:
           id
           uname -r
           printf 'RBCLAW_RUNNER_SMOKE_OK\n'
+
+  smoke-windows:
+    if: >-
+      github.repository == 'bjrambo/RBClaw' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'bjrambo' &&
+      github.triggering_actor == 'bjrambo' &&
+      github.ref == 'refs/heads/main'
+    runs-on: rbclaw-runner-server-win-ij21s2i
+    timeout-minutes: 3
+    steps:
+      - name: Verify isolated interactive Windows runner
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'runner-server-win') { throw 'Unexpected runner name' }
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Unexpected runner OS' }
+          if ($env:RUNNER_ARCH -ne 'X64') { throw 'Unexpected runner architecture' }
+          if ($env:COMPUTERNAME -ne 'DESKTOP-IJ21S2I') { throw 'Unexpected runner host' }
+          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+          if ($identity -ine "$env:COMPUTERNAME\qw5414") { throw 'Unexpected runner account' }
+          $workRoot = 'C:\rbclaw-runners\windows\_work_windows\'
+          if (-not $PWD.ProviderPath.StartsWith($workRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Unexpected runner work directory'
+          }
+          $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          if ($sessionId -le 0) { throw 'Windows runner requires an interactive user session' }
+          Write-Output "Runner: $env:RUNNER_NAME | OS: $env:RUNNER_OS | Architecture: $env:RUNNER_ARCH"
+          Write-Output "Host: $env:COMPUTERNAME | Account: $identity | Session: $sessionId"
+          Write-Output 'RBCLAW_WINDOWS_RUNNER_SMOKE_OK'
