@@ -250,6 +250,7 @@ import * as agentRunner from './agent-runner.js';
 import * as db from './db.js';
 import { buildRoomMemoryBriefing } from './sqlite-memory-store.js';
 import { runAgentForGroup } from './message-agent-executor.js';
+import { prepareMessageAgentExecutionTarget } from './message-agent-executor-target.js';
 import { resetPairedFollowUpScheduleState } from './paired-follow-up-scheduler.js';
 import * as pairedExecutionContext from './paired-execution-context.js';
 import * as serviceRouting from './service-routing.js';
@@ -768,6 +769,183 @@ describe('runAgentForGroup room model overrides', () => {
       }),
     );
   });
+});
+
+describe('Opus 5.5 paired execution model isolation', () => {
+  function prepareModelFixture() {
+    const group: RegisteredGroup = {
+      ...makeGroup(),
+      agentType: 'codex',
+      folder: 'test-group',
+      agentConfig: { codexModel: 'gpt-6.1-sol', codexEffort: 'xhigh' },
+    };
+    vi.mocked(serviceRouting.getEffectiveChannelLease).mockReturnValue({
+      chat_jid: 'group@test',
+      owner_agent_type: 'codex',
+      reviewer_agent_type: 'claude-code',
+      arbiter_agent_type: 'claude-code',
+      owner_service_id: 'codex-main',
+      reviewer_service_id: 'claude',
+      arbiter_service_id: 'claude',
+      activated_at: null,
+      reason: null,
+      explicit: false,
+    });
+    const context = {
+      task: {
+        id: 'paired-task-opus-model',
+        chat_jid: 'group@test',
+        group_folder: 'test-group',
+        work_dir: '/tmp/rbclaw-test-work',
+        owner_service_id: 'codex-main',
+        reviewer_service_id: 'claude',
+        title: null,
+        source_ref: 'HEAD',
+        plan_notes: null,
+        round_trip_count: 0,
+        review_requested_at: null,
+        status: 'active' as const,
+        arbiter_verdict: null,
+        arbiter_requested_at: null,
+        completion_reason: null,
+        created_at: '2026-10-13T00:00:00.000Z',
+        updated_at: '2026-10-13T00:00:00.000Z',
+      },
+      workDir: '/tmp/rbclaw-test-work',
+      envOverrides: {} as Record<string, string>,
+    };
+    vi.mocked(db.getLatestOpenPairedTaskForChat).mockReturnValue(context.task);
+    vi.mocked(
+      pairedExecutionContext.preparePairedExecutionContext,
+    ).mockReturnValue(context);
+    vi.mocked(config.getRoleModelConfig).mockImplementation((role) => ({
+      model: role === 'owner' ? 'gpt-6.1-sol' : 'claude-opus-5-5',
+      effort: role === 'owner' ? 'xhigh' : 'high',
+      fallbackEnabled: true,
+    }));
+    return { group, context };
+  }
+
+  it.each(['reviewer', 'arbiter'] as const)(
+    'injects the global Opus 5.5 model and unchanged high effort for %s',
+    async (role) => {
+      const { group, context } = prepareModelFixture();
+      const target = await prepareMessageAgentExecutionTarget(makeDeps(), {
+        group,
+        prompt: 'model fixture',
+        chatJid: 'group@test',
+        runId: `opus-${role}`,
+        forcedRole: role,
+      });
+
+      expect(target.activeRole).toBe(role);
+      expect(target.effectiveAgentType).toBe('claude-code');
+      expect(db.getRoomRoleAgentConfig).toHaveBeenCalledWith(
+        'group@test',
+        role,
+      );
+      expect(context.envOverrides).toMatchObject({
+        CLAUDE_MODEL: 'claude-opus-5-5',
+        CLAUDE_EFFORT: 'high',
+      });
+      expect(context.envOverrides).not.toHaveProperty('CODEX_MODEL');
+    },
+  );
+
+  it.each(['reviewer', 'arbiter'] as const)(
+    'preserves the room-level model and effort precedence for %s',
+    async (role) => {
+      const { group, context } = prepareModelFixture();
+      vi.mocked(db.getRoomRoleAgentConfig).mockReturnValue({
+        claudeModel: 'claude-room-model',
+        claudeEffort: 'max',
+      });
+      await prepareMessageAgentExecutionTarget(makeDeps(), {
+        group,
+        prompt: 'override fixture',
+        chatJid: 'group@test',
+        runId: `override-${role}`,
+        forcedRole: role,
+      });
+
+      expect(context.envOverrides).toMatchObject({
+        CLAUDE_MODEL: 'claude-room-model',
+        CLAUDE_EFFORT: 'max',
+      });
+    },
+  );
+
+  it('keeps the paired Codex owner model and effort unchanged', async () => {
+    const { group, context } = prepareModelFixture();
+    const target = await prepareMessageAgentExecutionTarget(makeDeps(), {
+      group,
+      prompt: 'owner fixture',
+      chatJid: 'group@test',
+      runId: 'opus-owner',
+      forcedRole: 'owner',
+    });
+
+    expect(target.effectiveAgentType).toBe('codex');
+    expect(context.envOverrides).toMatchObject({
+      CODEX_MODEL: 'gpt-6.1-sol',
+      CODEX_EFFORT: 'xhigh',
+    });
+    expect(context.envOverrides).not.toHaveProperty('CLAUDE_MODEL');
+  });
+
+  it('does not apply paired model settings to the single-room owner', async () => {
+    const { group } = prepareModelFixture();
+    vi.mocked(db.getLatestOpenPairedTaskForChat).mockReturnValue(undefined);
+    vi.mocked(
+      pairedExecutionContext.preparePairedExecutionContext,
+    ).mockReturnValue(undefined);
+    vi.mocked(serviceRouting.getEffectiveChannelLease).mockReturnValue({
+      chat_jid: 'group@test',
+      owner_agent_type: 'codex',
+      reviewer_agent_type: null,
+      arbiter_agent_type: null,
+      owner_service_id: 'codex-main',
+      reviewer_service_id: null,
+      arbiter_service_id: null,
+      activated_at: null,
+      reason: null,
+      explicit: false,
+    });
+    const target = await prepareMessageAgentExecutionTarget(makeDeps(), {
+      group,
+      prompt: 'single room fixture',
+      chatJid: 'group@test',
+      runId: 'opus-single',
+    });
+
+    expect(target.activeRole).toBe('owner');
+    expect(target.effectiveAgentType).toBe('codex');
+    expect(target.effectiveGroup.agentConfig).toEqual(group.agentConfig);
+    expect(target.pairedExecutionContext).toBeUndefined();
+    expect(config.getRoleModelConfig).not.toHaveBeenCalled();
+  });
+
+  it.each(['reviewer', 'arbiter'] as const)(
+    'does not inject Claude role settings into a forced Codex fallback for %s',
+    async (role) => {
+      const { group, context } = prepareModelFixture();
+      const target = await prepareMessageAgentExecutionTarget(makeDeps(), {
+        group,
+        prompt: 'Codex fallback fixture',
+        chatJid: 'group@test',
+        runId: `fallback-${role}`,
+        forcedRole: role,
+        forcedAgentType: 'codex',
+      });
+
+      expect(target.effectiveAgentType).toBe('codex');
+      expect(target.effectiveGroup.agentConfig?.codexModel).toBe('gpt-6.1-sol');
+      expect(context.envOverrides).not.toHaveProperty('CLAUDE_MODEL');
+      expect(context.envOverrides).not.toHaveProperty('CLAUDE_EFFORT');
+      expect(context.envOverrides).not.toHaveProperty('CODEX_MODEL');
+      expect(config.getRoleModelConfig).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('runAgentForGroup reviewer session reuse', () => {

@@ -626,6 +626,48 @@ describe('prepareGroupEnvironment prompt stacks', () => {
     expect(prepared.env.CLAUDE_CODE_OAUTH_TOKENS).toBeUndefined();
   });
 
+  it.each(['reviewer', 'arbiter'] as const)(
+    'keeps the existing OAuth environment when selecting Opus 5.5 for %s',
+    (role) => {
+      for (const key of [
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_BASE_URL',
+      ])
+        vi.stubEnv(key, undefined);
+      try {
+        mockReadEnvFile.mockReturnValue({
+          CLAUDE_MODEL: 'claude-opus-4-8',
+          CLAUDE_CODE_OAUTH_TOKEN: 'fixture-oauth-token',
+        });
+        const prepared = prepareGroupEnvironment(
+          {
+            ...group,
+            agentType: 'claude-code',
+            agentConfig: {
+              claudeModel: 'claude-opus-5-5',
+              claudeEffort: 'high',
+            },
+          },
+          false,
+          'dc:test',
+          { roomRole: role },
+        );
+
+        expect(prepared.env.CLAUDE_MODEL).toBe('claude-opus-5-5');
+        expect(prepared.env.CLAUDE_EFFORT).toBe('high');
+        expect(prepared.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(
+          'fixture-oauth-token',
+        );
+        expect(prepared.env).not.toHaveProperty('ANTHROPIC_API_KEY');
+        expect(prepared.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+        expect(prepared.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
   it('returns to the normal owner prompt stack after failover is cleared', () => {
     vi.mocked(config.isReviewService).mockReturnValue(true);
     vi.mocked(serviceRouting.hasReviewerLease).mockReturnValue(true);

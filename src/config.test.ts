@@ -142,6 +142,49 @@ describe('config/env loading', () => {
     expect(config.PAIRED_CARRY_FORWARD_LATEST_OWNER_FINAL).toBe(true);
   });
 
+  it('loads Opus 5.5 only for paired Claude roles while preserving owner and provider defaults', async () => {
+    const values = {
+      OWNER_AGENT_TYPE: 'codex',
+      REVIEWER_AGENT_TYPE: 'claude-code',
+      ARBITER_AGENT_TYPE: 'claude-code',
+      OWNER_MODEL: 'gpt-6.1-sol',
+      OWNER_EFFORT: 'xhigh',
+      REVIEWER_MODEL: 'claude-opus-5-5',
+      REVIEWER_EFFORT: 'high',
+      ARBITER_MODEL: 'claude-opus-5-5',
+      ARBITER_EFFORT: 'high',
+      CLAUDE_MODEL: 'claude-opus-4-8',
+      CODEX_MODEL: 'single-room-codex-model',
+    };
+    for (const key of Object.keys(values)) delete process.env[key];
+    fs.writeFileSync(
+      path.join(tempRoot, '.env'),
+      Object.entries(values)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n'),
+    );
+
+    const { loadConfig } = await import('./config/load-config.js');
+    const config = loadConfig();
+    expect(config.models.owner).toEqual({
+      model: 'gpt-6.1-sol',
+      effort: 'xhigh',
+      fallbackEnabled: true,
+    });
+    for (const role of ['reviewer', 'arbiter'] as const) {
+      expect(config.models[role]).toEqual({
+        model: 'claude-opus-5-5',
+        effort: 'high',
+        fallbackEnabled: true,
+      });
+    }
+    expect(config.paired.ownerAgentType).toBe('codex');
+    expect(config.paired.reviewerAgentType).toBe('claude-code');
+    expect(config.paired.arbiterAgentType).toBe('claude-code');
+    expect(config.providers.claudeDefaultModel).toBe('claude-opus-4-8');
+    expect(config.providers.codexDefaultModel).toBe('single-room-codex-model');
+  });
+
   it('defaults unsafe-host Claude reviewer fresh-session forcing to disabled and honors explicit opt-in', async () => {
     let config = await import('./config.js');
     expect(config.PAIRED_FORCE_FRESH_CLAUDE_REVIEWER_SESSION).toBe(false);
