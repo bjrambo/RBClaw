@@ -192,9 +192,8 @@ export function createExecuteTurn(deps: CreateExecuteTurnDeps): ExecuteTurnFn {
       lease,
       resolvedDeliveryRole ?? 'owner',
     );
-    const allowProgressReplayWithoutFinal =
-      args.pairedTurnIdentity?.role !== 'reviewer' &&
-      args.pairedTurnIdentity?.role !== 'arbiter';
+    // Display telemetry must never become authoritative paired-turn output.
+    const allowProgressReplayWithoutFinal = !pairedRoom;
     const turnController = new MessageTurnController({
       chatJid,
       group,

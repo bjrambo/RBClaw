@@ -110,6 +110,40 @@ describe('message-runtime queued cursor handling', () => {
     resetPairedFollowUpScheduleState();
   });
 
+  it.each([
+    { outputStatus: 'success' as const, visiblePhase: 'final' },
+    { outputStatus: 'error' as const, visiblePhase: 'final' },
+    { outputStatus: 'error' as const, visiblePhase: 'silent' },
+  ])(
+    'preserves a newer /stop cursor when the paired owner finishes: $outputStatus/$visiblePhase',
+    async (completion) => {
+      const task = makeTask({
+        owner_service_id: 'codex',
+        owner_agent_type: 'codex',
+      });
+      createPairedTask(task);
+      const lastAgentTimestamps: Record<string, string> = {};
+      const saveState = vi.fn();
+      const executeTurn: RunQueuedGroupTurnArgs['executeTurn'] = vi.fn(
+        async () => {
+          // The loop consumes /stop while this older turn (seq 48) is running.
+          lastAgentTimestamps[task.chat_jid] = '50';
+          return { ...completion, deliverySucceeded: true };
+        },
+      );
+      await runQueuedGroupTurn(
+        makeQueuedTurnArgs({
+          task,
+          executeTurn,
+          lastAgentTimestamps,
+          saveState,
+        }),
+      );
+      expect(lastAgentTimestamps).toEqual({ [task.chat_jid]: '50' });
+      expect(saveState).not.toHaveBeenCalled();
+    },
+  );
+
   it('keeps the queued human cursor when the owner turn fails silently', async () => {
     const task = makeTask({
       owner_service_id: 'codex',

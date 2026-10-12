@@ -66,14 +66,18 @@ export function advanceLastAgentCursor(
   cursorKey?: string,
 ): void {
   const key = cursorKey ?? chatJid;
-  if (typeof cursorOrTimestamp === 'number') {
-    lastAgentTimestamps[key] = String(cursorOrTimestamp);
-  } else {
-    lastAgentTimestamps[key] = normalizeStoredSeqCursor(
-      cursorOrTimestamp,
-      chatJid,
-    );
-  }
+  const nextCursor =
+    typeof cursorOrTimestamp === 'number'
+      ? String(cursorOrTimestamp)
+      : normalizeStoredSeqCursor(cursorOrTimestamp, chatJid);
+  const currentCursor = normalizeStoredSeqCursor(
+    lastAgentTimestamps[key],
+    chatJid,
+  );
+  // An older turn can finish after /stop has already consumed newer input.
+  // Never put that command (or any later consumed message) back in the queue.
+  if (Number(nextCursor) < Number(currentCursor)) return;
+  lastAgentTimestamps[key] = nextCursor;
   saveState();
 }
 

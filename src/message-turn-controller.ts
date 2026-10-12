@@ -64,6 +64,7 @@ export class MessageTurnController {
   private latestProgressText: string | null = null;
   private previousProgressText: string | null = null;
   private pendingProgressText: string | null = null;
+  private pendingProgressSend: Promise<void> | null = null;
   private toolActivities: string[] = [];
   private progressCreating = false;
   private latestProgressRendered: string | null = null;
@@ -190,15 +191,15 @@ export class MessageTurnController {
 
     switch (phase) {
       case 'intermediate':
-        this.handleIntermediateOutput(text);
+        await this.handleIntermediateOutput(text);
         return;
 
       case 'tool-activity':
-        this.handleToolActivityOutput(result, text);
+        await this.handleToolActivityOutput(result, text);
         return;
 
       case 'progress':
-        this.handleProgressOutput(result, text);
+        await this.handleProgressOutput(result, text);
         return;
 
       case 'final':
@@ -253,7 +254,7 @@ export class MessageTurnController {
     }
   }
 
-  private handleIntermediateOutput(text: string | null): void {
+  private async handleIntermediateOutput(text: string | null): Promise<void> {
     if (text) {
       if (this.progressMessageId) {
         // Progress exists — update heading (works with or without subagents)
@@ -261,11 +262,9 @@ export class MessageTurnController {
         this.latestProgressText = text;
         this.latestProgressTextForFinal = text;
         this.pendingProgressText = null; // discard stale buffer
-        this.toolActivities = [];
         void this.progressEdits.request();
       } else {
-        // No progress yet — buffer (creates on next event)
-        this.bufferProgress(text);
+        await this.bufferProgress(text);
       }
     }
     if (!this.poisonedSessionDetected) {
@@ -273,31 +272,41 @@ export class MessageTurnController {
     }
   }
 
-  private handleToolActivityOutput(
+  private async handleToolActivityOutput(
     result: AgentOutput,
     text: string | null,
-  ): void {
+  ): Promise<void> {
+    // Full activity history remains in the scoped runtime log, not turnOutputs.
+    if (text) {
+      this.log.info(
+        this.buildOutboundAuditContext({ toolActivity: text }),
+        'Agent tool activity',
+      );
+    }
     if (result.agentId) {
       // Subagent tool activity
       recordSubagentToolActivity(this.subagents, result.agentId, text);
-      this.ensureProgressMessageExists();
-      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
+      await this.ensureProgressMessageExists();
+      this.progressEdits.start(1_000, !!this.options.channel.editMessage);
       if (!this.poisonedSessionDetected) {
         this.resetIdleTimer();
       }
       return;
     }
     // Main agent tool activity
-    this.ensureProgressMessageExists();
     if (text) {
       this.addToolActivity(text);
     }
+    await this.ensureProgressMessageExists();
     if (!this.poisonedSessionDetected) {
       this.resetIdleTimer();
     }
   }
 
-  private handleProgressOutput(result: AgentOutput, text: string | null): void {
+  private async handleProgressOutput(
+    result: AgentOutput,
+    text: string | null,
+  ): Promise<void> {
     if (result.agentId) {
       recordSubagentProgress(this.subagents, {
         agentId: result.agentId,
@@ -307,10 +316,9 @@ export class MessageTurnController {
       });
       if (!this.latestProgressText) {
         this.latestProgressText = '작업 중...';
-        this.latestProgressTextForFinal = '작업 중...';
       }
-      this.ensureProgressMessageExists();
-      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
+      await this.ensureProgressMessageExists();
+      this.progressEdits.start(1_000, !!this.options.channel.editMessage);
       if (this.progressMessageId) {
         void this.progressEdits.request();
       }
@@ -328,10 +336,10 @@ export class MessageTurnController {
         // Progress message already visible — update heading directly
         this.previousProgressText = this.latestProgressText;
         this.latestProgressText = text;
-        this.toolActivities = [];
+        this.latestProgressTextForFinal = text;
         void this.progressEdits.request();
       } else {
-        this.bufferProgress(text);
+        await this.bufferProgress(text);
       }
     }
     if (!this.poisonedSessionDetected) {
@@ -346,6 +354,7 @@ export class MessageTurnController {
     deliverySucceeded: boolean;
     visiblePhase: VisiblePhase;
   }> {
+    await this.pendingProgressSend;
     await this.deactivateTyping('turn:finish', { outputStatus });
     if (outputStatus === 'error') {
       this.hadError = true;
@@ -359,7 +368,10 @@ export class MessageTurnController {
       const replayText = this.latestProgressTextForFinal;
       if (isHumanMessageCloseReason(this.options.getCloseReason?.() ?? null)) {
         this.resetProgressState();
-      } else if (this.options.allowProgressReplayWithoutFinal !== false) {
+      } else if (
+        !this.options.pairedTurnIdentity &&
+        this.options.allowProgressReplayWithoutFinal !== false
+      ) {
         this.log.info(
           'Sending a separate final message from the last progress output after agent completion',
         );
@@ -447,54 +459,64 @@ export class MessageTurnController {
    * Ensure a progress message exists in Discord.
    * Creates one if needed, using pending or default text.
    */
-  private ensureProgressMessageExists(): void {
+  private async ensureProgressMessageExists(): Promise<void> {
     if (this.progressMessageId || this.progressCreating) return;
     this.progressCreating = true;
     const heading =
       this.pendingProgressText || this.latestProgressText || '작업 중...';
     if (!this.latestProgressText) {
       this.latestProgressText = heading;
-      this.latestProgressTextForFinal = heading;
     }
-    void this.sendProgressMessage(heading).then(() => {
+    try {
+      await this.queueProgressMessage(heading, false);
+      this.progressEdits.start(1_000, !!this.options.channel.editMessage);
+    } finally {
       this.progressCreating = false;
-      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
-      if (
-        (this.toolActivities.length > 0 || this.subagents.size > 0) &&
-        this.progressMessageId
-      ) {
-        void this.progressEdits.request();
-      }
-    });
+    }
     this.pendingProgressText = null;
   }
 
   /**
-   * Buffer a progress update. The previous pending text gets flushed
-   * immediately, and the new text waits until the next event arrives.
-   * If a final result arrives before another progress, the pending
-   * text is discarded — so it never shows up in Discord.
+   * Publish the first complete public progress text immediately. Keep pending
+   * only while delivery is in flight, never until the next agent event.
    */
-  private bufferProgress(text: string): void {
-    if (this.pendingProgressText) {
-      void this.sendProgressMessage(this.pendingProgressText);
-      this.toolActivities = [];
-    }
+  private async bufferProgress(text: string): Promise<void> {
     this.pendingProgressText = text;
+    try {
+      await this.queueProgressMessage(text);
+    } finally {
+      if (this.pendingProgressText === text) this.pendingProgressText = null;
+    }
   }
 
   /**
    * Append a tool activity line and update the progress message in-place.
    */
   private addToolActivity(description: string): void {
-    const MAX_ACTIVITIES = 2;
+    const MAX_ACTIVITIES = 8;
     this.toolActivities.push(description);
     if (this.toolActivities.length > MAX_ACTIVITIES) {
       this.toolActivities = this.toolActivities.slice(-MAX_ACTIVITIES);
     }
     // Don't sync here — let the ticker handle periodic updates
     // to avoid flooding Discord with edits.
-    this.progressEdits.start(5_000, !!this.options.channel.editMessage);
+    this.progressEdits.start(1_000, !!this.options.channel.editMessage);
+  }
+
+  private async queueProgressMessage(
+    text: string,
+    replayAsFinal = true,
+  ): Promise<void> {
+    const delivery = (this.pendingProgressSend ?? Promise.resolve()).then(() =>
+      this.sendProgressMessage(text, replayAsFinal),
+    );
+    this.pendingProgressSend = delivery;
+    try {
+      await delivery;
+    } finally {
+      if (this.pendingProgressSend === delivery)
+        this.pendingProgressSend = null;
+    }
   }
 
   /**
@@ -634,6 +656,8 @@ export class MessageTurnController {
       flushPendingText?: string | null;
     },
   ): Promise<void> {
+    // A fast final must not race a still-pending initial Discord send.
+    await this.pendingProgressSend;
     this.progressEdits.stop();
     this.progressEdits.cancelPending();
     if (options?.flushPendingText) {
@@ -746,7 +770,10 @@ export class MessageTurnController {
     this.closeRequested = true;
     this.options.requestClose(reason);
   }
-  private async sendProgressMessage(text: string): Promise<void> {
+  private async sendProgressMessage(
+    text: string,
+    replayAsFinal = true,
+  ): Promise<void> {
     if (
       this.options.canDeliverFinalText &&
       !this.options.canDeliverFinalText()
@@ -774,7 +801,7 @@ export class MessageTurnController {
     if (this.progressStartedAt === null) {
       this.progressStartedAt = Date.now();
     }
-    this.latestProgressTextForFinal = text;
+    if (replayAsFinal) this.latestProgressTextForFinal = text;
     this.previousProgressText = this.latestProgressText;
     this.latestProgressText = text;
     const rendered = this.renderProgressMessage(text);
@@ -840,7 +867,7 @@ export class MessageTurnController {
         textLength: text.length,
         renderedLength: rendered.length,
       });
-      this.progressEdits.start(5_000, !!this.options.channel.editMessage);
+      this.progressEdits.start(1_000, !!this.options.channel.editMessage);
       this.visiblePhase = toVisiblePhase('progress');
       return;
     }

@@ -272,7 +272,7 @@ describe('createMessageRuntime silent run completion', () => {
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-1',
-        '첫 번째 진행상황입니다.',
+        '두 번째 진행상황입니다.',
       );
     } finally {
       vi.useRealTimers();
@@ -371,14 +371,14 @@ describe('createMessageRuntime typing and empty-final resets', () => {
 
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, _input, _onProcess, onOutput) => {
-        // First progress: buffered
+        // First progress: shown immediately
         await onOutput?.({
           status: 'success',
           phase: 'progress',
           result: '첫 번째 진행상황입니다.',
           newSessionId: 'session-empty-final',
         });
-        // Second progress: flushes first to Discord
+        // Second progress: updates the tracked message
         await onOutput?.({
           status: 'success',
           phase: 'progress',
@@ -393,7 +393,7 @@ describe('createMessageRuntime typing and empty-final resets', () => {
           result: '<internal>hidden final</internal>',
           newSessionId: 'session-empty-final',
         });
-        // Third progress after reset: buffered
+        // Third progress after reset: shown immediately
         await onOutput?.({
           status: 'success',
           phase: 'progress',
@@ -450,7 +450,7 @@ describe('createMessageRuntime typing and empty-final resets', () => {
       });
 
       expect(result).toBe(true);
-      // First progress flushed when second arrives
+      // First progress is already visible before the second event
       expect(channel.sendAndTrack).toHaveBeenNthCalledWith(
         1,
         chatJid,
@@ -466,20 +466,20 @@ describe('createMessageRuntime typing and empty-final resets', () => {
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-1',
-        P('첫 번째 진행상황입니다.\n\n10초'),
+        P('계속 진행 중입니다.\n\n10초'),
       );
       // Timer tick edits the second tracked progress
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-2',
-        P('두 번째 진행상황입니다.\n\n10초'),
+        P('거의 완료입니다.\n\n10초'),
       );
       // finish() replaces the latest tracked progress message with the final text
       expect(channel.sendMessage).not.toHaveBeenCalled();
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-2',
-        '두 번째 진행상황입니다.',
+        '거의 완료입니다.',
       );
     } finally {
       vi.useRealTimers();
@@ -488,7 +488,7 @@ describe('createMessageRuntime typing and empty-final resets', () => {
 });
 
 describe('createMessageRuntime flushed progress promotion', () => {
-  it('promotes the last flushed progress output to a final message when the agent completes without a final phase', async () => {
+  it('promotes the latest visible progress output to a final message when the agent completes without a final phase', async () => {
     vi.useFakeTimers();
     const chatJid = 'group@test';
     const group = makeGroup('codex');
@@ -513,14 +513,14 @@ describe('createMessageRuntime flushed progress promotion', () => {
 
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, _input, _onProcess, onOutput) => {
-        // First progress: buffered
+        // First progress: shown immediately
         await onOutput?.({
           status: 'success',
           phase: 'progress',
           result: '검증 중입니다.',
           newSessionId: 'session-progress-only',
         });
-        // Second progress: flushes first to Discord (creates tracked message)
+        // Second progress: updates the tracked message (creates tracked message)
         await onOutput?.({
           status: 'success',
           phase: 'progress',
@@ -578,7 +578,7 @@ describe('createMessageRuntime flushed progress promotion', () => {
       });
 
       expect(result).toBe(true);
-      // First progress flushed when second arrives
+      // First progress is already visible before the second event
       expect(channel.sendAndTrack).toHaveBeenCalledWith(
         chatJid,
         P('검증 중입니다.\n\n0초'),
@@ -594,14 +594,14 @@ describe('createMessageRuntime flushed progress promotion', () => {
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-1',
-        '검증 중입니다.',
+        '테스트도 통과했습니다.',
       );
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('keeps going after a tracked progress edit fails and still emits the last flushed final message', async () => {
+  it('keeps going after a tracked progress edit fails and still emits the latest visible final message', async () => {
     vi.useFakeTimers();
     const chatJid = 'group@test';
     const group = makeGroup('codex');
@@ -629,7 +629,7 @@ describe('createMessageRuntime flushed progress promotion', () => {
 
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, _input, _onProcess, onOutput) => {
-        // First progress: buffered
+        // First progress: shown immediately
         await onOutput?.({
           status: 'success',
           phase: 'progress',
@@ -694,7 +694,7 @@ describe('createMessageRuntime flushed progress promotion', () => {
       });
 
       expect(result).toBe(true);
-      // The first flushed progress is still tracked
+      // The first immediately published progress is still tracked
       expect(channel.sendAndTrack).toHaveBeenCalledWith(
         chatJid,
         P('진행 중입니다.\n\n0초'),
@@ -710,7 +710,7 @@ describe('createMessageRuntime flushed progress promotion', () => {
       expect(channel.editMessage).toHaveBeenCalledWith(
         chatJid,
         'progress-1',
-        '진행 중입니다.',
+        '거의 완료.',
       );
     } finally {
       vi.useRealTimers();
@@ -878,14 +878,14 @@ describe('createMessageRuntime silent failures and single-final guarantees', () 
 
     vi.mocked(agentRunner.runAgentProcess).mockImplementation(
       async (_group, _input, _onProcess, onOutput) => {
-        // First progress: buffered
+        // First progress: shown immediately
         await onOutput?.({
           status: 'success',
           phase: 'progress',
           result: '중간 진행상황입니다.',
           newSessionId: 'session-error',
         });
-        // Second progress: flushes first to Discord
+        // Second progress: updates the tracked message
         await onOutput?.({
           status: 'success',
           phase: 'progress',
@@ -935,7 +935,7 @@ describe('createMessageRuntime silent failures and single-final guarantees', () 
     });
 
     expect(result).toBe(true);
-    // First progress flushed when second arrives
+    // First progress is already visible before the second event
     expect(channel.sendAndTrack).toHaveBeenCalledWith(
       chatJid,
       P('중간 진행상황입니다.\n\n0초'),

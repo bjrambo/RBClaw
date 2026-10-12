@@ -8,6 +8,7 @@ import {
   buildReviewerPendingPrompt,
 } from './message-runtime-prompts.js';
 import type { NewMessage, PairedTask, PairedTurnOutput } from './types.js';
+import { TASK_STATUS_MESSAGE_PREFIX } from './task-watch-status.js';
 
 const CARRY_FORWARD_MARKER =
   '[Carried forward context from the previous task: latest owner final]';
@@ -451,6 +452,45 @@ describe('message-runtime-prompts arbiter output context', () => {
 });
 
 describe('message-runtime-prompts prompt hygiene', () => {
+  it('excludes display telemetry even from the first-turn raw-message fallback', () => {
+    const telemetry = {
+      ...makeHumanMessage(`${TASK_STATUS_MESSAGE_PREFIX}🔄 명령 실행 시작`),
+      is_bot_message: true,
+      sender: 'reviewer',
+    };
+    const prompt = buildPairedTurnPrompt({
+      taskId: 'task-1',
+      chatJid: 'group@test',
+      timezone: 'UTC',
+      turnOutputs: [],
+      missedMessages: [],
+      labeledFallbackMessages: [
+        makeHumanMessage('현재 사용자 지시'),
+        telemetry,
+      ],
+    });
+    expect(prompt).toContain('현재 사용자 지시');
+    expect(prompt).not.toContain('명령 실행 시작');
+  });
+
+  it('keeps displayed actions out of reviewer prompts while retaining the canonical result', () => {
+    const prompt = buildReviewerPendingPrompt({
+      chatJid: 'group@test',
+      timezone: 'UTC',
+      turnOutputs: [makeTurnOutput('TASK_DONE 실제 최종 검증 결과')],
+      recentHumanMessages: [
+        {
+          ...makeHumanMessage(`${TASK_STATUS_MESSAGE_PREFIX}✅ MCP 도구 완료`),
+          is_bot_message: true,
+        },
+      ],
+      lastHumanMessage: null,
+      taskCreatedAt: '2026-04-20T00:58:00.000Z',
+    });
+    expect(prompt).toContain('실제 최종 검증 결과');
+    expect(prompt).not.toContain('MCP 도구 완료');
+  });
+
   it('preserves turn output order instead of timestamp interleaving', () => {
     const prompt = buildReviewerPendingPrompt({
       chatJid: 'group@test',

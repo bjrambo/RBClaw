@@ -58,7 +58,7 @@ interface RunnerOutput {
   status: 'success' | 'error';
   result: string | null;
   output?: RunnerStructuredOutput;
-  phase?: 'progress' | 'final';
+  phase?: 'progress' | 'final' | 'tool-activity';
   newSessionId?: string;
   error?: string;
   compaction?: {
@@ -205,6 +205,14 @@ async function executeAppServerTurn(
       cwd: EFFECTIVE_CWD,
       model: CODEX_MODEL || undefined,
       effort: CODEX_EFFORT || undefined,
+      onToolActivity: (message) => {
+        writeOutput({
+          status: 'success',
+          phase: 'tool-activity',
+          ...normalizeStructuredOutput(message),
+          newSessionId: threadId,
+        });
+      },
       onProgress: (message) => {
         const trimmed = message.trim();
         if (!trimmed || trimmed === lastProgressMessage) {

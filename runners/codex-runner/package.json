@@ -10,7 +10,7 @@
     "start": "bun dist/index.js"
   },
   "dependencies": {
-    "@openai/codex": "0.158.0",
+    "@openai/codex": "0.159.2",
     "rbclaw-runners-shared": "workspace:*"
   },
   "devDependencies": {

@@ -128,6 +128,48 @@ function makeDeps(
 const trigger = /^@Andy\b/i;
 
 describe('handleSessionCommand', () => {
+  it.each([true, false])(
+    'consumes /stop by seq without clearing the session (running=%s)',
+    async (running) => {
+      const deps = makeDeps({ killProcess: vi.fn(() => running) });
+      const result = await handleSessionCommand({
+        missedMessages: [
+          makeMsg('/stop', { seq: 10 }),
+          makeMsg('next prompt', { id: 'next', seq: 11 }),
+        ],
+        isMainGroup: true,
+        groupName: 'test',
+        triggerPattern: trigger,
+        timezone: 'UTC',
+        deps,
+      });
+      expect(result).toEqual({ handled: true, success: true });
+      expect(deps.killProcess).toHaveBeenCalledOnce();
+      expect(deps.advanceCursor).toHaveBeenCalledExactlyOnceWith(10);
+      expect(deps.sendMessage).toHaveBeenCalledExactlyOnceWith(
+        running
+          ? 'Agent stopped.'
+          : 'No agent is currently running in this room.',
+      );
+      expect(deps.clearSession).not.toHaveBeenCalled();
+      expect(deps.runAgent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the timestamp fallback for a legacy /stop with no sequence', async () => {
+    const deps = makeDeps();
+    await handleSessionCommand({
+      missedMessages: [makeMsg('/stop')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(deps.advanceCursor).toHaveBeenCalledExactlyOnceWith('100');
+    expect(deps.clearSession).not.toHaveBeenCalled();
+  });
+
   it('returns handled:false when no session command found', async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({

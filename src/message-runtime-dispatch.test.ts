@@ -178,6 +178,63 @@ describe('processLoopGroupMessages', () => {
     );
   });
 
+  it('does not process a delivered /stop again, including while its acknowledgement is pending', async () => {
+    let finishAck!: () => void;
+    vi.mocked(channel.sendMessage).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishAck = resolve;
+        }),
+    );
+    const args = defaultArgs({
+      group: { ...group, isMain: true },
+      groupMessages: [message({ content: '/stop', seq: 20 })],
+    });
+    const first = processLoopGroupMessages(args);
+    await processLoopGroupMessages(args);
+    finishAck();
+    await first;
+
+    expect(args.killProcess).toHaveBeenCalledOnce();
+    expect(channel.sendMessage).toHaveBeenCalledExactlyOnceWith(
+      chatJid,
+      'Agent stopped.',
+    );
+    expect(args.enqueueMessageCheck).not.toHaveBeenCalled();
+  });
+
+  it('queues a fresh human message when an already consumed /stop is redelivered beside it', async () => {
+    const args = defaultArgs({
+      group: { ...group, isMain: true },
+      lastAgentTimestamps: { [chatJid]: '20' },
+      groupMessages: [
+        message({ id: 'stop', content: '/stop', seq: 20 }),
+        message({ id: 'next', content: 'new prompt', seq: 21 }),
+      ],
+    });
+    await processLoopGroupMessages(args);
+    expect(args.killProcess).not.toHaveBeenCalled();
+    expect(channel.sendMessage).not.toHaveBeenCalled();
+    expect(args.enqueueMessageCheck).toHaveBeenCalledOnce();
+    expect(args.lastAgentTimestamps).toEqual({ [chatJid]: '20' });
+  });
+
+  it('preserves the batch tail even when sending the /stop acknowledgement fails', async () => {
+    vi.mocked(channel.sendMessage).mockRejectedValueOnce(
+      new Error('send failed'),
+    );
+    const args = defaultArgs({
+      group: { ...group, isMain: true },
+      groupMessages: [
+        message({ id: 'stop', content: '/stop', seq: 20 }),
+        message({ id: 'next', content: 'new prompt', seq: 21 }),
+      ],
+    });
+    await expect(processLoopGroupMessages(args)).rejects.toThrow('send failed');
+    expect(args.enqueueMessageCheck).toHaveBeenCalledOnce();
+    expect(args.lastAgentTimestamps).toEqual({ [chatJid]: '20' });
+  });
+
   it('ignores human messages already claimed by the active run instead of self-interrupting it', async () => {
     const args = defaultArgs({
       isActiveRunInputMessage: vi.fn((_chatJid, msg) => msg.seq === 10),

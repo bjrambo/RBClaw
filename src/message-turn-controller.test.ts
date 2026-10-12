@@ -127,7 +127,11 @@ describe('MessageTurnController outbound audit logging', () => {
       'dc:test-room',
       expect.stringContaining('첫 진행 상황'),
     );
-    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'dc:test-room',
+      'progress-1',
+      expect.stringContaining('둘째 진행 상황'),
+    );
     expect(deliverFinalText).toHaveBeenCalledWith('최종 답변', {
       replaceMessageId: 'progress-1',
     });
@@ -264,7 +268,11 @@ describe('MessageTurnController outbound audit logging', () => {
 
     expect(finishResult.visiblePhase).toBe('progress');
     expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
-    expect(channel.editMessage).not.toHaveBeenCalled();
+    expect(channel.editMessage).toHaveBeenCalledWith(
+      'dc:test-room',
+      'progress-1',
+      expect.stringContaining('근거를 다시 대조 중입니다.'),
+    );
     expect(deliverFinalText).not.toHaveBeenCalled();
     expect(getAuditEntries()).not.toEqual(
       expect.arrayContaining([
@@ -281,7 +289,7 @@ describe('MessageTurnController final delivery and attachments', () => {
     vi.resetAllMocks();
   });
 
-  it('does not flush pending progress before final delivery for paired reviewer turns', async () => {
+  it('shows the first reviewer progress immediately and delivers only the explicit final', async () => {
     const channel = makeChannel();
     const deliverFinalText = vi.fn().mockResolvedValue(true);
     const controller = new MessageTurnController({
@@ -314,13 +322,13 @@ describe('MessageTurnController final delivery and attachments', () => {
     } as any);
     await controller.finish('success');
 
-    expect(channel.sendAndTrack).not.toHaveBeenCalled();
+    expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
     expect(channel.sendMessage).not.toHaveBeenCalled();
     expect(deliverFinalText).toHaveBeenCalledTimes(1);
     expect(deliverFinalText).toHaveBeenCalledWith(
       'PROCEED 근거를 확인했습니다.',
       {
-        replaceMessageId: null,
+        replaceMessageId: 'progress-1',
       },
     );
   });
@@ -501,7 +509,7 @@ describe('MessageTurnController owner progress replacement', () => {
     });
   });
 
-  it('replaces the tracked progress message when finish() replays the last owner progress as final', async () => {
+  it('does not replay paired owner progress as final even when the legacy option is omitted', async () => {
     const channel = {
       ...makeChannel(),
       name: 'discord',
@@ -544,9 +552,7 @@ describe('MessageTurnController owner progress replacement', () => {
     await controller.finish('success');
 
     expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
-    expect(deliverFinalText).toHaveBeenCalledWith('첫 진행 상황', {
-      replaceMessageId: 'progress-1',
-    });
+    expect(deliverFinalText).not.toHaveBeenCalled();
   });
 });
 
@@ -748,7 +754,7 @@ describe('MessageTurnController progress edit serialization', () => {
     } as any);
     await flushAsync();
 
-    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
     expect(channel.editMessage).toHaveBeenCalledWith(
       'dc:test-room',
       'progress-1',
@@ -810,7 +816,7 @@ describe('MessageTurnController progress edit serialization', () => {
     } as any);
     await flushAsync();
 
-    expect(editMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).toHaveBeenCalledTimes(2);
     expect(observeReceiver).toHaveBeenCalledWith(channel);
 
     await controller.handleOutput({
@@ -971,7 +977,7 @@ describe('MessageTurnController progress edit serialization', () => {
     resolveEdit();
     await finishPromise;
 
-    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
     expect(finishSettled).toBe(true);
     expect(deliverFinalText).not.toHaveBeenCalled();
   });
@@ -1031,7 +1037,7 @@ describe('MessageTurnController progress edit guard and failure finals', () => {
     await flushAsync();
 
     expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
-    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
 
     canDeliver = false;
     await controller.handleOutput({
@@ -1046,7 +1052,7 @@ describe('MessageTurnController progress edit guard and failure finals', () => {
 
     expect(finishResult.deliverySucceeded).toBe(true);
     expect(channel.sendAndTrack).toHaveBeenCalledTimes(1);
-    expect(channel.editMessage).toHaveBeenCalledTimes(1);
+    expect(channel.editMessage).toHaveBeenCalledTimes(2);
     expect(channel.sendMessage).not.toHaveBeenCalled();
     expect(deliverFinalText).not.toHaveBeenCalled();
   });
