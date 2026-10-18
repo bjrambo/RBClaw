@@ -15,6 +15,7 @@ export const CLAUDE_EFFORT_VALUES = [
   'low',
   'medium',
   'high',
+  'xhigh',
   'max',
 ] as const;
 
@@ -23,7 +24,10 @@ export type EffortValue = (typeof CODEX_EFFORT_VALUES)[number];
 export function effortValuesForAgent(
   agentType: SettingsAgentType,
 ): readonly EffortValue[] {
-  return agentType === 'claude-code' || agentType === 'glm-code'
+  if (agentType === 'glm-code') {
+    return CLAUDE_EFFORT_VALUES.filter((value) => value !== 'xhigh');
+  }
+  return agentType === 'claude-code'
     ? CLAUDE_EFFORT_VALUES
     : CODEX_EFFORT_VALUES;
 }

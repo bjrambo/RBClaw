@@ -1,4 +1,4 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { RBCLAW_ENV, IPC_POLL_MS } from 'rbclaw-runners-shared';
 
 import { compactBoundaryFromMessage } from './compaction-boundary.js';
@@ -291,11 +291,8 @@ class ClaudeQueryRunner {
           : undefined;
   }
 
-  private resolveEffort(): 'low' | 'medium' | 'high' | 'max' | undefined {
-    return (
-      (process.env.CLAUDE_EFFORT as 'low' | 'medium' | 'high' | 'max') ||
-      undefined
-    );
+  private resolveEffort(): Options['effort'] {
+    return (process.env.CLAUDE_EFFORT as Options['effort']) || undefined;
   }
 
   private buildAllowedTools(readonlyRuntime: boolean): string[] {

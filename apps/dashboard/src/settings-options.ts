@@ -1,6 +1,6 @@
 export const PRESET_MODELS = {
   codex: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.3-codex'],
-  claude: ['claude-opus-4-8'],
+  claude: ['claude-opus-5-5', 'claude-opus-4-8'],
   glm: ['glm-5.2', 'glm-5.2[1m]', 'glm-5.1'],
 } as const;
 
@@ -21,6 +21,7 @@ export const CLAUDE_EFFORT_VALUES = [
   'low',
   'medium',
   'high',
+  'xhigh',
   'max',
 ] as const;
 
@@ -32,7 +33,10 @@ export type EffortValue = (typeof CODEX_EFFORT_VALUES)[number];
 export function effortValuesForAgent(
   agentType: AgentType,
 ): readonly EffortValue[] {
-  return agentType === 'claude-code' || agentType === 'glm-code'
+  if (agentType === 'glm-code') {
+    return CLAUDE_EFFORT_VALUES.filter((value) => value !== 'xhigh');
+  }
+  return agentType === 'claude-code'
     ? CLAUDE_EFFORT_VALUES
     : CODEX_EFFORT_VALUES;
 }
