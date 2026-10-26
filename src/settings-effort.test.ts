@@ -15,13 +15,22 @@ describe('settings-effort', () => {
     );
   });
 
-  it('keeps Codex-only efforts out of Claude-compatible agents', () => {
-    expect(isEffortSupported('claude-code', 'xhigh')).toBe(false);
-    expect(isEffortSupported('claude-code', 'ultra')).toBe(false);
+  it('supports xhigh for Claude Code and Codex but not GLM', () => {
+    expect(isEffortSupported('claude-code', 'xhigh')).toBe(true);
     expect(isEffortSupported('glm-code', 'xhigh')).toBe(false);
-    expect(isEffortSupported('glm-code', 'ultra')).toBe(false);
     expect(isEffortSupported('codex', 'xhigh')).toBe(true);
-    expect(isEffortSupported('codex', 'ultra')).toBe(true);
-    expect(isEffortSupported('claude-code', '')).toBe(true);
   });
+
+  it('keeps ultra exclusive to Codex', () => {
+    expect(isEffortSupported('claude-code', 'ultra')).toBe(false);
+    expect(isEffortSupported('glm-code', 'ultra')).toBe(false);
+    expect(isEffortSupported('codex', 'ultra')).toBe(true);
+  });
+
+  it.each(['claude-code', 'codex', 'glm-code'] as const)(
+    'allows the default effort for %s',
+    (agentType) => {
+      expect(isEffortSupported(agentType, '')).toBe(true);
+    },
+  );
 });

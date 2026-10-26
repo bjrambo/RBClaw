@@ -158,10 +158,17 @@ chunk별로 사용합니다. native idempotency가 없는 Channel의 모호한 �
 - startup precondition은 전용 오류로 올리고, `RestartPreventExitStatus=78`로 crash loop를 막음
 - deploy는 `migrate-room-registrations`를 선행한 뒤 service restart를 수행
 
-### 진행 표시 배포 확인 (2026-10-05)
+### 현재 개발·운영 Git 기준 (2026-10-26)
+
+- 개발 `/home/qw5414/bot/ejclaw-dev`는 `main`에서 `github/main`을, 운영 `/home/qw5414/bot/EJClaw`는 `main`에서 `origin/main`을 추적합니다. 두 원격은 모두 `bjrambo/RBClaw` 저장소의 `main`을 가리킵니다.
+- 개발 폴더에서 먼저 수정·검증하고, 승인된 변경을 커밋·push한 다음 운영 폴더에서 `git pull --ff-only`로 반영합니다. 작업 트리가 깨끗하지 않거나 fast-forward가 불가능하면 강제로 덮어쓰지 않고 중단합니다.
+- 동기화 완료 시 양쪽 HEAD가 같고 `git status --porcelain`, `git diff`, `git diff --cached`가 모두 비어 있는지 확인합니다. `.env`·인증정보·실행 데이터 등 로컬 파일은 각 환경에서 보존합니다.
+- 기존 `feature/dotnet-runtime` 브랜치는 보존하며 `origin/feature/dotnet-runtime`을 추적합니다. 현재 운영 checkout이나 기본 pull 대상으로 사용하지 않습니다. Git 소스 동기화만으로 빌드·서비스 재시작까지 완료된 것은 아닙니다.
+
+### 진행 표시 배포 확인 (2026-10-05, 과거 기록)
 
 - 구현 커밋 `9756cdb`는 승인된 runtime/test 14파일만 포함하며, 개발 `main`과 GitHub `main`에 동일하게 반영했습니다. 기존 fixtures, 시크릿 백업, 임시 검증 자료는 커밋에서 제외했습니다.
-- 운영 `/home/qw5414/bot/EJClaw`은 기존 작업 보존을 위해 `feature/dotnet-runtime`의 HEAD `115bcc7`을 유지합니다. 적용된 14파일은 구현 커밋과 동일하지만, 운영 checkout은 기존 사용자 작업과 배포 파일을 포함한 의도된 미커밋 상태입니다. 운영 HEAD나 전체 트리가 원격 `main`과 같다는 뜻은 아닙니다.
+- 당시 운영 `/home/qw5414/bot/EJClaw`은 기존 작업 보존을 위해 `feature/dotnet-runtime`의 HEAD `115bcc7`을 유지했습니다. 적용된 14파일은 구현 커밋과 동일했지만, 운영 checkout은 기존 사용자 작업과 배포 파일을 포함한 의도된 미커밋 상태였습니다. 이는 당시 기록이며, 현재 운영은 위의 개발·운영 Git 기준을 따릅니다.
 - 개발·운영 테스트 1,706개 통과·3개 건너뜀, 전체 runtime 빌드와 282개 source 파일의 dist freshness 검증을 통과했습니다. 재시작 후 서비스 `active/running`, `ExecMainStatus=0`과 compiled production 경로의 `RBCLAW_PROGRESS_LIVE_OK` 실호출을 확인했습니다.
 - 실호출의 표시 검증은 테스트 수신부를 사용했습니다. 재시작 후 owner↔reviewer 흐름은 정상 실행됐지만, 별도의 새 사용자 Discord 메시지 왕복 테스트와 실제 마우스 실행 속도 측정은 수행하지 않았습니다.
 - 운영의 다른 미커밋 작업을 정리하거나 전체 checkout을 reset하지 않습니다. 재배포·롤백 시에도 승인된 변경과 기존 사용자 작업을 구분하고, 배포 소스가 해당 구현 커밋과 일치하는지 확인해야 합니다.
