@@ -1,4 +1,5 @@
 import { logger } from './logger.js';
+import { filterTasklessPairedBotMessages } from './paired-final-report.js';
 import { normalizeStoredSeqCursor } from './message-cursor.js';
 import { getLatestOpenPairedTaskForChat, getMessagesSinceSeq } from './db.js';
 import {
@@ -125,6 +126,7 @@ export async function processQueuedGroupDispatch(args: {
   group: RegisteredGroup;
   channel: Channel;
   processableGroupMessages: NewMessage[];
+  pairedChannels: Channel[];
   assistantName: string;
   failureFinalText: string;
   timezone: string;
@@ -158,8 +160,31 @@ export async function processQueuedGroupDispatch(args: {
     getProcessableMessages(chatJid, rawPendingMessages, channel),
     args.failureFinalText,
   );
-  const messagesToSend =
-    pendingMessages.length > 0 ? pendingMessages : processableGroupMessages;
+  const messagesToSend = filterTasklessPairedBotMessages({
+    chatJid,
+    pairedRoom: hasReviewerLease(chatJid),
+    task: loopPendingTask,
+    messages:
+      pendingMessages.length > 0 ? pendingMessages : processableGroupMessages,
+    channels: args.pairedChannels,
+  });
+  if (messagesToSend.length === 0) {
+    const lastMessage =
+      rawPendingMessages.at(-1) ?? processableGroupMessages.at(-1);
+    if (lastMessage) {
+      advanceLastAgentCursor(
+        args.lastAgentTimestamps,
+        args.saveState,
+        chatJid,
+        lastMessage.seq ?? lastMessage.timestamp,
+      );
+    }
+    logger.info(
+      { chatJid, messageCount: pendingMessages.length },
+      'Consumed taskless paired bot messages without piping or enqueueing an owner turn',
+    );
+    return;
+  }
   const labeledMessagesToSend = args.labelPairedSenders(
     chatJid,
     messagesToSend,
@@ -277,6 +302,7 @@ export async function processLoopGroupMessages(args: {
   group: RegisteredGroup;
   groupMessages: NewMessage[];
   channel: Channel;
+  pairedChannels: Channel[];
   assistantName: string;
   failureFinalText: string;
   triggerPattern: RegExp;
@@ -449,6 +475,7 @@ export async function processLoopGroupMessages(args: {
     group,
     channel,
     processableGroupMessages,
+    pairedChannels: args.pairedChannels,
     assistantName: args.assistantName,
     failureFinalText: args.failureFinalText,
     timezone: args.timezone,

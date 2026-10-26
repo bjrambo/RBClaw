@@ -82,6 +82,7 @@ function defaultArgs(
     group,
     groupMessages: [message({})],
     channel,
+    pairedChannels: [channel],
     assistantName: '오너',
     failureFinalText: 'FAILED',
     triggerPattern: /^\/clear\b/,

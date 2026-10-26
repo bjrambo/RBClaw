@@ -87,6 +87,7 @@ export async function processMessageLoopTick(args: {
       group,
       groupMessages,
       channel,
+      pairedChannels: args.channels,
       assistantName: args.assistantName,
       failureFinalText: args.failureFinalText,
       triggerPattern: args.triggerPattern,

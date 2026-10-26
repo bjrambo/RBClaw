@@ -7,7 +7,13 @@ import {
 } from './db.js';
 import { getEnv } from './env.js';
 import { parseVisibleVerdict } from './paired-verdict.js';
-import type { OutboundAttachment, PairedRoomRole } from './types.js';
+import type {
+  Channel,
+  NewMessage,
+  OutboundAttachment,
+  PairedRoomRole,
+  PairedTask,
+} from './types.js';
 
 /** Explicit room opt-in; never enable another room as a side effect. */
 export function isPairedFinalReportEnabled(chatJid: string): boolean {
@@ -16,6 +22,36 @@ export function isPairedFinalReportEnabled(chatJid: string): boolean {
     .map((value) => value.trim())
     .filter(Boolean)
     .includes(chatJid);
+}
+
+/** A published peer result is not a new request once its task has closed. */
+export function filterTasklessPairedBotMessages(args: {
+  chatJid: string;
+  pairedRoom: boolean;
+  task: PairedTask | null | undefined;
+  messages: NewMessage[];
+  channels: ReadonlyArray<Channel | null>;
+}): NewMessage[] {
+  if (
+    args.task ||
+    !args.pairedRoom ||
+    !isPairedFinalReportEnabled(args.chatJid)
+  ) {
+    return args.messages;
+  }
+  return args.messages.filter(
+    (message) =>
+      message.message_source_kind === 'trusted_external_bot' ||
+      !message.is_bot_message ||
+      !args.channels.some(
+        (channel) =>
+          channel &&
+          ['discord', 'discord-review', 'discord-arbiter'].includes(
+            channel.name,
+          ) &&
+          channel.isOwnMessage?.(message),
+      ),
+  );
 }
 
 function reportPrefix(taskId: string): string {

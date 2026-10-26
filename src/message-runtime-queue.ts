@@ -1,5 +1,7 @@
 import { getPairedTaskById, getPairedTurnOutputs } from './db.js';
 import { logger } from './logger.js';
+import { filterTasklessPairedBotMessages } from './paired-final-report.js';
+import { hasReviewerLease } from './service-routing.js';
 import {
   buildArbiterPromptForTask,
   buildPairedTurnPrompt,
@@ -523,8 +525,30 @@ export async function runQueuedGroupTurn(args: {
   labelPairedSenders: (chatJid: string, messages: NewMessage[]) => NewMessage[];
   formatMessages: (messages: NewMessage[], timezone: string) => string;
 }): Promise<boolean> {
-  const { chatJid, group, runId, log, missedMessages, task, roleToChannel } =
-    args;
+  const { chatJid, group, runId, log, task, roleToChannel } = args;
+  const missedMessages = filterTasklessPairedBotMessages({
+    chatJid,
+    pairedRoom: hasReviewerLease(chatJid),
+    task,
+    messages: args.missedMessages,
+    channels: Object.values(roleToChannel),
+  });
+  if (missedMessages.length === 0) {
+    const lastMessage = args.missedMessages.at(-1);
+    if (lastMessage) {
+      advanceLastAgentCursor(
+        args.lastAgentTimestamps,
+        args.saveState,
+        chatJid,
+        lastMessage.seq ?? lastMessage.timestamp,
+      );
+    }
+    log.info(
+      { chatJid, messageCount: args.missedMessages.length },
+      'Consumed taskless paired bot messages without starting an owner turn',
+    );
+    return true;
+  }
   const plan = resolveQueuedGroupTurnPlan({
     chatJid,
     group,
