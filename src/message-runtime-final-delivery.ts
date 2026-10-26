@@ -2,6 +2,7 @@ import { createProducedWorkItem } from './db.js';
 import { resolveRuntimeAttachmentBaseDirs } from './attachment-base-dirs.js';
 import { logger } from './logger.js';
 import { deliverOpenWorkItem } from './message-runtime-delivery.js';
+import { preparePairedFinalReport } from './paired-final-report.js';
 import type {
   AgentType,
   Channel,
@@ -51,18 +52,19 @@ export async function deliverMessageRuntimeFinalText(args: {
     return true;
   }
 
+  const finalReport = preparePairedFinalReport(args);
   const workItem = createProducedWorkItem({
     group_folder: args.group.folder,
     chat_jid: args.chatJid,
     agent_type: args.forcedAgentType ?? args.group.agentType ?? 'claude-code',
     service_id: args.deliveryServiceId ?? undefined,
     delivery_role: args.deliveryRole,
-    paired_task_id: args.pairedTaskId ?? null,
+    paired_task_id: finalReport.pairedTaskId ?? null,
     delivery_key_seed: args.runId,
     start_seq: args.startSeq,
     end_seq: args.endSeq,
-    result_payload: args.text,
-    attachments: args.attachments,
+    result_payload: finalReport.text,
+    attachments: finalReport.attachments,
   });
 
   return deliverOpenWorkItem({
