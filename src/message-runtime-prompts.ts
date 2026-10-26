@@ -246,7 +246,7 @@ export function buildReviewerPendingPrompt(args: {
     args.reviewPhase === 'final'
       ? "\n\nCurrent review phase: final verification. Verify the owner's claimed completion, Git, deployment, restart, and operational evidence that are in the approved user scope. If everything is complete, TASK_DONE closes the task; return work to the owner only for a concrete defect or missing requested action." +
         (isPairedFinalReportEnabled(args.chatJid)
-          ? `\n\n${PAIRED_FINAL_REPORT_GUIDANCE}\nThe runtime combines the owner result and attachments with your final approval.\nWrite your review decision, checks you actually performed, corrections, and remaining\ncaveats; do not repeat the full owner report. Your review remains public.`
+          ? `\n\n${PAIRED_FINAL_REPORT_GUIDANCE}\nKeep final approval brief: identify the owner result being approved, state your review\nconclusion and checks you actually performed, and mention corrections or remaining\ncaveats when present. The runtime does not append the owner report or attachments.\nYour review remains public; reject concrete defects instead of approving them.`
           : '')
       : '';
   if (args.turnOutputs.length > 0) {

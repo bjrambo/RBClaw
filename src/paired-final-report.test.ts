@@ -71,14 +71,15 @@ describe('room-scoped final decision reports', () => {
   });
 
   it.each(['TASK_DONE', 'DONE', 'Approved'])(
-    'preserves the approved owner result and visible reviewer conclusion for %s',
+    'publishes only the visible reviewer conclusion for %s',
     (verdict) => {
       const text = verdict + '\n최종 승인. 미검증 사항은 실제 마이크입니다.';
       const report = preparePairedFinalReport({ ...input, text });
-      expect(report.text).toContain(owner.output_text);
+      expect(report.text).not.toContain(owner.output_text);
       expect(report.text).toContain(text);
       expect(report.text).toContain('최종 결정사항');
-      expect(report.attachments).toEqual(owner.attachments);
+      expect(report.attachments).toBeUndefined();
+      expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
       expect(
         isPairedFinalReportPayload({
           paired_task_id: task.id,
@@ -105,8 +106,10 @@ describe('room-scoped final decision reports', () => {
       ...input,
       deliveryRole: 'owner',
       text: owner.output_text,
+      attachments: owner.attachments,
     });
     expect(report.text).toBe(owner.output_text);
+    expect(report.attachments).toEqual(owner.attachments);
     expect(report.text).not.toContain('최종 결정사항');
     expect(db.getPairedTaskById).not.toHaveBeenCalled();
     expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
@@ -149,7 +152,9 @@ describe('room-scoped final decision reports', () => {
     const result = preparePairedFinalReport(input);
     expect(result.text).not.toContain('이전 과업 배포');
     expect(result.text).not.toContain('carried-forward');
-    expect(result.text).toContain('오너 결과 원문을 찾지 못했습니다');
+    expect(result.text).toContain(input.text);
+    expect(result.text).not.toContain('오너 결과 원문을 찾지 못했습니다');
+    expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
     vi.mocked(db.getLatestPairedTaskForChat).mockReturnValue({
       ...task,
       id: 'new-task',
@@ -157,22 +162,53 @@ describe('room-scoped final decision reports', () => {
     expect(preparePairedFinalReport(input).text).toBe(input.text);
   });
 
-  it('includes reviewer caveats and de-duplicates evidence attachments', () => {
+  it('preserves reviewer caveats and their own evidence without owner attachments', () => {
+    const reviewerAttachments = [
+      { path: '/evidence/review.txt', name: 'review.txt' },
+    ];
     const report = preparePairedFinalReport({
       ...input,
-      attachments: owner.attachments,
+      attachments: reviewerAttachments,
     });
-    expect(report.attachments).toHaveLength(1);
+    expect(report.attachments).toEqual(reviewerAttachments);
+    expect(report.attachments).not.toContainEqual(owner.attachments[0]);
     expect(report.text).toContain('배포는 이번 범위에 포함되지 않았습니다');
+    expect(report.text).not.toContain(owner.output_text);
   });
 
-  it('reports canonical storage truncation instead of claiming a complete source', () => {
+  it('keeps existing de-duplication for the reviewer evidence itself', () => {
+    const evidence = { path: '/evidence/review.txt', name: 'review.txt' };
+    const report = preparePairedFinalReport({
+      ...input,
+      attachments: [evidence, { ...evidence }],
+    });
+    expect(report.attachments).toEqual([evidence]);
+    expect(
+      preparePairedFinalReport({ ...input, attachments: [] }).attachments,
+    ).toBeUndefined();
+  });
+
+  it('does not load or duplicate a long owner report in a short final approval', () => {
     vi.mocked(db.getPairedTurnOutputs).mockReturnValue([
       { ...owner, output_text: '가'.repeat(50_000) },
     ] as any);
-    expect(preparePairedFinalReport(input).text).toContain(
-      '원문 일부가 누락됐을 수 있습니다',
-    );
+    const report = preparePairedFinalReport(input);
+    expect(report.text).toContain(input.text);
+    expect(report.text).not.toContain('가'.repeat(100));
+    expect(report.text).not.toContain('원문 일부가 누락됐을 수 있습니다');
+    expect(report.text.length).toBeLessThan(200);
+    expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
+  });
+
+  it('preserves prepared approval text and evidence when delivery is retried', () => {
+    const attachments = [{ path: '/evidence/review.txt', name: 'review.txt' }];
+    const report = preparePairedFinalReport({ ...input, attachments });
+    expect(
+      preparePairedFinalReport({ ...input, text: report.text, attachments }),
+    ).toEqual(report);
+    expect(report.text.match(/최종 결정사항/g)).toHaveLength(1);
+    expect(report.attachments).toEqual(attachments);
+    expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
   });
 
   it('requires a matching running task attempt for direct IPC reports', () => {
@@ -183,7 +219,10 @@ describe('room-scoped final decision reports', () => {
     vi.mocked(db.getPairedTurnAttempts).mockReturnValue([
       { active_run_id: 'run-final', role: 'reviewer', state: 'running' },
     ] as any);
-    expect(preparePairedFinalReport(ipc).text).toContain(owner.output_text);
+    const report = preparePairedFinalReport(ipc);
+    expect(report.text).toContain('[과업 task-final]');
+    expect(report.text).toContain(input.text);
+    expect(report.text).not.toContain(owner.output_text);
     expect(preparePairedFinalReport({ ...ipc, runId: 'stale-run' }).text).toBe(
       input.text,
     );
@@ -201,13 +240,15 @@ describe('room-scoped final decision reports', () => {
       ...input,
       deliveryRole: 'owner',
       text: owner.output_text,
+      attachments: owner.attachments,
     });
     expect(report.text).toBe(owner.output_text);
+    expect(report.attachments).toEqual(owner.attachments);
     expect(report.text).not.toContain('최종 결정사항');
     expect(db.getPairedTurnOutputs).not.toHaveBeenCalled();
   });
 
-  it('uses the same report composition for direct terminal IPC without an extra queue item', async () => {
+  it('delivers only reviewer approval through terminal IPC without an extra queue item', async () => {
     vi.mocked(db.getPairedTurnsForTask).mockReturnValue([
       { turn_id: 'turn-final', role: 'reviewer' },
     ] as any);
@@ -256,12 +297,16 @@ describe('room-scoped final decision reports', () => {
       expect.objectContaining({
         delivery_role: 'reviewer',
         paired_task_id: task.id,
-        result_payload: expect.stringContaining(owner.output_text),
+        result_payload: expect.stringContaining(input.text),
       }),
     );
     expect(createWorkItem.mock.calls[0][0].result_payload).toContain(
       input.text,
     );
+    expect(createWorkItem.mock.calls[0][0].result_payload).not.toContain(
+      owner.output_text,
+    );
+    expect(createWorkItem.mock.calls[0][0].attachments).toBeUndefined();
     expect(noteDirectTerminalDelivery).toHaveBeenCalledWith(
       input.chatJid,
       'reviewer',
@@ -269,7 +314,7 @@ describe('room-scoped final decision reports', () => {
     );
   });
 
-  it('persists the composed SDK final once without changing its speaker or task', async () => {
+  it('persists the reviewer-only SDK final once without changing its speaker or task', async () => {
     vi.mocked(db.createProducedWorkItem).mockImplementation(
       (args) => ({ ...args, id: 5, delivery_attempts: 0 }) as any,
     );
@@ -300,8 +345,7 @@ describe('room-scoped final decision reports', () => {
       expect.objectContaining({
         delivery_role: 'reviewer',
         paired_task_id: task.id,
-        result_payload: expect.stringContaining(owner.output_text),
-        attachments: owner.attachments,
+        result_payload: expect.stringContaining(input.text),
       }),
     );
     expect(deliverOpenWorkItem).toHaveBeenCalledWith(
@@ -312,6 +356,9 @@ describe('room-scoped final decision reports', () => {
         }),
       }),
     );
+    const saved = vi.mocked(db.createProducedWorkItem).mock.calls[0][0];
+    expect(saved.result_payload).not.toContain(owner.output_text);
+    expect(saved.attachments).toBeUndefined();
   });
 
   it('also renders a final approval recovered after execution failure', () => {
@@ -320,10 +367,12 @@ describe('room-scoped final decision reports', () => {
       status: 'completed',
       completion_reason: 'done',
     } as any);
-    expect(preparePairedFinalReport(input).text).toContain(owner.output_text);
+    const report = preparePairedFinalReport(input);
+    expect(report.text).toContain(input.text);
+    expect(report.text).not.toContain(owner.output_text);
   });
 
-  it('adds the same public report contract only to enabled owner/reviewer final prompts', () => {
+  it('assigns the full answer to the owner and concise approval to the final reviewer', () => {
     const base = { turnOutputs: [], recentHumanMessages: [] };
     const ownerPrompt = buildFinalizePendingPrompt({
       ...base,
@@ -332,6 +381,9 @@ describe('room-scoped final decision reports', () => {
     expect(ownerPrompt).toContain('Public final-report contract');
     expect(ownerPrompt).toContain(
       'Keep owner, reviewer, and arbiter conversations',
+    );
+    expect(ownerPrompt).toContain(
+      'The owner provides the full, self-contained answer or implementation report.',
     );
     expect(
       buildFinalizePendingPrompt({ ...base, chatJid: 'dc:other' }),
@@ -343,17 +395,21 @@ describe('room-scoped final decision reports', () => {
       lastHumanMessage: null,
       reviewPhase: 'final' as const,
     };
-    expect(buildReviewerPendingPrompt(reviewer)).toContain(
-      'The last task message must stand on its own',
+    const reviewerPrompt = buildReviewerPendingPrompt(reviewer);
+    expect(reviewerPrompt).toContain(
+      'Keep final approval brief: identify the owner result being approved',
     );
-    expect(buildReviewerPendingPrompt(reviewer)).toContain(
-      'The runtime combines the owner result and attachments with your final approval',
+    expect(reviewerPrompt).toContain(
+      'Do not repeat or reattach the owner report',
     );
-    expect(buildReviewerPendingPrompt(reviewer)).toContain(
-      'do not repeat the full owner report',
+    expect(reviewerPrompt).toContain(
+      'Concrete defects still require rejection',
     );
-    expect(ownerPrompt).not.toContain(
+    expect(reviewerPrompt).not.toContain(
       'The runtime combines the owner result and attachments',
+    );
+    expect(reviewerPrompt).not.toContain(
+      'The last task message must stand on its own',
     );
     expect(
       buildReviewerPendingPrompt({

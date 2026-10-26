@@ -2,7 +2,6 @@ import {
   getLatestPairedTaskForChat,
   getPairedTaskById,
   getPairedTurnAttempts,
-  getPairedTurnOutputs,
   getPairedTurnsForTask,
 } from './db.js';
 import { getEnv } from './env.js';
@@ -72,14 +71,17 @@ export function isPairedFinalReportPayload(item: {
 export const PAIRED_FINAL_REPORT_GUIDANCE = `Public final-report contract:
 Keep owner, reviewer, and arbiter conversations, feedback, and approvals public.
 Never expose hidden reasoning, credentials, or private tool results.
-The last task message must stand on its own, whether the owner or reviewer finishes.
-For a question, state the answer, necessary reasons, and limitations briefly.
-For implementation, state the final decision, actual changes, verification results,
+The owner provides the full, self-contained answer or implementation report.
+For an owner answer to a question, state the answer, necessary reasons, and limitations briefly.
+For an owner implementation report, state the final decision, actual changes, verification results,
 authorized Git/deploy/restart actions actually performed, and remaining risks.
-Do not finish with only "approved", "see above", or a reference to an earlier answer.
+The final reviewer provides only the approval target, review conclusion, checks actually
+performed, and remaining caveats. Do not repeat or reattach the owner report.
+The owner report and final review stay as separate public messages.
+Concrete defects still require rejection; never hide corrections or unverified items.
 Do not invent evidence or perform extra work merely to write the report.
 The existing review and completion rules still apply; do not request another turn
-just to repeat a report. Review conclusions and caveats remain visible.`;
+just to repeat a report or acknowledge final approval. Review conclusions and caveats remain visible.`;
 
 interface FinalReportInput {
   chatJid: string;
@@ -97,8 +99,8 @@ interface FinalReportOutput {
 }
 
 /**
- * One existing output, not another model turn or another outbox entry. Preserve
- * the final reviewer's words and include the owner evidence they approved.
+ * Preserve the final reviewer's own output in the existing work item. The owner
+ * report and evidence remain in the owner's public message, not in this approval.
  */
 export function preparePairedFinalReport(
   input: FinalReportInput,
@@ -150,41 +152,14 @@ export function preparePairedFinalReport(
   }
 
   if (input.text.startsWith(reportPrefix(task.id))) return original;
-  const ownerOutput = [...getPairedTurnOutputs(task.id)]
-    .reverse()
-    .find(
-      (output) =>
-        output.task_id === task.id &&
-        output.role === 'owner' &&
-        output.turn_number > 0 &&
-        output.output_text.trim(),
-    );
-  const sections = [reportPrefix(task.id)];
-  if (ownerOutput) {
-    sections.push('검토된 오너 작업 결과\n' + ownerOutput.output_text);
-    if (ownerOutput.output_text.length >= 50_000) {
-      sections.push(
-        '주의: 저장된 오너 본문이 저장 한도에 도달해 원문 일부가 누락됐을 수 있습니다.',
-      );
-    }
-  } else {
-    sections.push(
-      '주의: 이 과업의 오너 결과 원문을 찾지 못했습니다. 아래 검토 결론만 확인할 수 있습니다.',
-    );
-  }
-  sections.push('최종 검토 결론\n' + input.text);
-
-  const attachments = [
-    ...(ownerOutput?.attachments ?? []),
-    ...(input.attachments ?? []),
-  ];
+  const attachments = input.attachments ?? [];
   const uniqueAttachments = attachments.filter(
     (attachment, index) =>
       attachments.findIndex((other) => other.path === attachment.path) ===
       index,
   );
   return {
-    text: sections.join('\n\n'),
+    text: reportPrefix(task.id) + input.text,
     pairedTaskId: task.id,
     attachments: uniqueAttachments.length ? uniqueAttachments : undefined,
   };
