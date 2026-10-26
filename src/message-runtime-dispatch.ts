@@ -1,5 +1,8 @@
 import { logger } from './logger.js';
-import { filterTasklessPairedBotMessages } from './paired-final-report.js';
+import {
+  filterTasklessPairedBotMessages,
+  isPairedFinalReportEnabled,
+} from './paired-final-report.js';
 import { normalizeStoredSeqCursor } from './message-cursor.js';
 import { getLatestOpenPairedTaskForChat, getMessagesSinceSeq } from './db.js';
 import {
@@ -240,6 +243,12 @@ export async function processQueuedGroupDispatch(args: {
         dispatchCursorKey,
       );
     }
+    // The poller holds the owner channel even while a reviewer/arbiter runs.
+    // In opted-in rooms the running turn alone owns typing and its cleanup;
+    // old human context must not create a second, unowned owner timer here.
+    const suppressQueuedTyping =
+      isBotOnlyPairedFollowUp ||
+      (hasReviewerLease(chatJid) && isPairedFinalReportEnabled(chatJid));
     logger.debug(
       {
         transition: 'typing:on',
@@ -248,11 +257,11 @@ export async function processQueuedGroupDispatch(args: {
         group: group.name,
         groupFolder: group.folder,
         endSeq: endSeq ?? null,
-        suppressed: isBotOnlyPairedFollowUp,
+        suppressed: suppressQueuedTyping,
       },
       'Typing indicator transition',
     );
-    if (!isBotOnlyPairedFollowUp) {
+    if (!suppressQueuedTyping) {
       await channel
         .setTyping?.(chatJid, true)
         ?.catch((err) =>

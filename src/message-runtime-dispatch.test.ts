@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db.js', () => ({
   getLastHumanMessageTimestamp: vi.fn(() => null),
@@ -19,8 +19,10 @@ vi.mock('./paired-task-status.js', () => ({
 import {
   getLastHumanMessageTimestamp,
   getLatestOpenPairedTaskForChat,
+  getMessagesSinceSeq,
 } from './db.js';
 import { processLoopGroupMessages } from './message-runtime-dispatch.js';
+import { MessageTurnController } from './message-turn-controller.js';
 import { transitionPairedTaskStatus } from './paired-task-status.js';
 import { hasReviewerLease } from './service-routing.js';
 import type { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -355,5 +357,158 @@ describe('processLoopGroupMessages', () => {
     expect(args.closeStdin).not.toHaveBeenCalled();
     expect(args.enqueueMessageCheck).not.toHaveBeenCalled();
     expect(args.lastAgentTimestamps).toEqual({ [chatJid]: '13' });
+  });
+});
+
+describe('queued typing ownership in opted-in paired rooms', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(timestamp));
+    vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', chatJid);
+    hasReviewerLeaseMock.mockReturnValue(true);
+    getLastHumanMessageTimestampMock.mockReturnValue(timestamp);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  function harness() {
+    const timers = new Map<string, ReturnType<typeof setInterval>>();
+    const refreshes: string[] = [];
+    const channels = ['discord', 'discord-review', 'discord-arbiter'].map(
+      (name) => ({
+        ...channel,
+        name,
+        setTyping: vi.fn(async (_jid: string, on: boolean) => {
+          const existing = timers.get(name);
+          if (existing) clearInterval(existing);
+          timers.delete(name);
+          if (on) {
+            timers.set(
+              name,
+              setInterval(() => refreshes.push(name), 8_000),
+            );
+          }
+        }),
+      }),
+    );
+    const oldHuman = message({ id: 'old-human', seq: 10 });
+    const peer = message({
+      id: 'new-reviewer-result',
+      seq: 12,
+      content: 'TASK_DONE\nApproved',
+      sender: 'reviewer-bot',
+      sender_name: 'Reviewer',
+      is_from_me: false,
+      is_bot_message: true,
+      message_source_kind: 'bot',
+    });
+    vi.mocked(getMessagesSinceSeq).mockReturnValue([oldHuman, peer]);
+    const args = defaultArgs({
+      channel: channels[0],
+      pairedChannels: channels,
+      groupMessages: [peer],
+    });
+    return { channels, timers, refreshes, oldHuman, peer, args };
+  }
+
+  it.each([
+    ['owner', 'success'],
+    ['reviewer', 'success'],
+    ['arbiter', 'success'],
+    ['owner', 'error'],
+    ['reviewer', 'error'],
+    ['arbiter', 'error'],
+  ] as const)(
+    'leaves no owner typing timer after the %s turn finishes with %s beside stale human context',
+    async (role, outputStatus) => {
+      const test = harness();
+      getLatestOpenPairedTaskForChatMock.mockReturnValue({
+        id: 'typing-task',
+        status:
+          role === 'arbiter'
+            ? 'in_arbitration'
+            : role === 'owner'
+              ? 'active'
+              : 'in_review',
+        review_phase: 'final',
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      const roleChannel =
+        test.channels[['owner', 'reviewer', 'arbiter'].indexOf(role)];
+      const controller = new MessageTurnController({
+        chatJid,
+        group,
+        runId: `typing-${role}`,
+        channel: roleChannel,
+        idleTimeout: 60_000,
+        failureFinalText: 'FAILED',
+        isClaudeCodeAgent: role !== 'owner',
+        clearSession: vi.fn(),
+        requestClose: vi.fn(),
+        deliverFinalText: vi.fn(async () => true),
+        deliveryRole: role,
+      });
+      await controller.start();
+      try {
+        await processLoopGroupMessages(test.args);
+      } finally {
+        await controller.finish(outputStatus);
+      }
+
+      expect(test.args.sendQueuedMessage).toHaveBeenCalledOnce();
+      expect(test.args.labelPairedSenders).toHaveBeenCalledWith(chatJid, [
+        test.oldHuman,
+        test.peer,
+      ]);
+      expect(test.args.closeStdin).not.toHaveBeenCalled();
+      expect(
+        test.channels[0].setTyping.mock.calls.filter(([, on]) => on),
+      ).toHaveLength(role === 'owner' ? 1 : 0);
+      expect(roleChannel.setTyping).toHaveBeenCalledWith(chatJid, true);
+      expect(roleChannel.setTyping).toHaveBeenCalledWith(chatJid, false);
+      expect(test.timers.size).toBe(0);
+      await vi.advanceTimersByTimeAsync(16_000);
+      expect(test.refreshes).toEqual([]);
+    },
+  );
+
+  it('keeps legacy queued typing when the paired-room feature is disabled', async () => {
+    vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', 'dc:another-room');
+    const test = harness();
+    getLatestOpenPairedTaskForChatMock.mockReturnValue({
+      id: 'typing-task',
+      status: 'in_review',
+      review_phase: 'final',
+    });
+    await processLoopGroupMessages(test.args);
+    expect(test.channels[0].setTyping).toHaveBeenCalledWith(chatJid, true);
+    expect(test.args.sendQueuedMessage).toHaveBeenCalledOnce();
+    await test.channels[0].setTyping(chatJid, false);
+  });
+
+  it('does not change queued typing in a non-paired room even if opted in', async () => {
+    hasReviewerLeaseMock.mockReturnValue(false);
+    getLatestOpenPairedTaskForChatMock.mockReturnValue(null);
+    const test = harness();
+    const trustedEvent = {
+      ...test.peer,
+      is_bot_message: false,
+      message_source_kind: 'trusted_external_bot' as const,
+    };
+    test.args.groupMessages = [trustedEvent];
+    vi.mocked(getMessagesSinceSeq).mockReturnValue([
+      test.oldHuman,
+      trustedEvent,
+    ]);
+    await processLoopGroupMessages(test.args);
+    expect(test.channels[0].setTyping).toHaveBeenCalledWith(chatJid, true);
+    expect(test.args.sendQueuedMessage).toHaveBeenCalledOnce();
+    await test.channels[0].setTyping(chatJid, false);
   });
 });
