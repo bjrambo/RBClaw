@@ -502,7 +502,7 @@ tail -n 100 logs/rbclaw.error.log
 - [docs/architecture.md](docs/architecture.md) — 데이터 모델, 실행 흐름, 주요 파일
 - [docs/configuration.md](docs/configuration.md) — `.env` 키와 디버깅 경로
 - [apps/android/README.md](apps/android/README.md) — Android companion 빌드와 연결
-- [apps/voice-companion/README.md](apps/voice-companion/README.md) — Windows Voice Companion
+- [RBClaw.VoiceCompanion](https://github.com/bjrambo/RBClaw.VoiceCompanion) — Windows Voice Companion (standalone private C# repository)
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 기여 범위와 검증 방법
 - [docs/legacy-compat-removal-spec.md](docs/legacy-compat-removal-spec.md) — 남아 있는 레거시 제거 계획
 - [CHANGELOG.md](CHANGELOG.md) — 릴리즈 이력
