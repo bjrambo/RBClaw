@@ -4,7 +4,11 @@ import {
   isPairedFinalReportEnabled,
 } from './paired-final-report.js';
 import { normalizeStoredSeqCursor } from './message-cursor.js';
-import { getLatestOpenPairedTaskForChat, getMessagesSinceSeq } from './db.js';
+import {
+  getLatestOpenPairedTaskForChat,
+  getMessagesSinceSeq,
+  pausePairedTaskForChat,
+} from './db.js';
 import {
   buildQueuedTurnDispatch,
   executeBotOnlyPairedFollowUpAction,
@@ -25,7 +29,6 @@ import {
 } from './session-commands.js';
 import { isSessionCommandSenderAllowed } from './config.js';
 import { hasReviewerLease } from './service-routing.js';
-import { transitionPairedTaskStatus } from './paired-task-status.js';
 import type { ExecuteTurnFn } from './message-runtime-types.js';
 import type { ScheduledPairedFollowUpIntentKind } from './paired-follow-up-scheduler.js';
 import type {
@@ -288,24 +291,6 @@ function advancePastSessionCommand(args: {
   );
 }
 
-function completePairedTaskAsStopped(chatJid: string): void {
-  if (!hasReviewerLease(chatJid)) return;
-  const task = getLatestOpenPairedTaskForChat(chatJid);
-  if (!task) return;
-
-  const now = new Date().toISOString();
-  transitionPairedTaskStatus({
-    taskId: task.id,
-    currentStatus: task.status,
-    nextStatus: 'completed',
-    expectedUpdatedAt: task.updated_at,
-    updatedAt: now,
-    patch: {
-      completion_reason: 'stopped',
-    },
-  });
-}
-
 export async function processLoopGroupMessages(args: {
   chatJid: string;
   group: RegisteredGroup;
@@ -402,8 +387,12 @@ export async function processLoopGroupMessages(args: {
       isSessionCommandSenderAllowed(loopCmdMsg.sender),
     );
     if (loopCommand === '/stop' && isAllowedSessionCommand) {
-      const killed = args.killProcess();
-      completePairedTaskAsStopped(chatJid);
+      let killed = false;
+      try {
+        if (hasReviewerLease(chatJid)) pausePairedTaskForChat(chatJid);
+      } finally {
+        killed = args.killProcess();
+      }
       advancePastSessionCommand({
         chatJid,
         commandMessage: loopCmdMsg,
@@ -476,6 +465,27 @@ export async function processLoopGroupMessages(args: {
       },
       'Queued human message for a fresh turn instead of piping into active agent',
     );
+    return;
+  }
+
+  const task = hasReviewerLease(chatJid)
+    ? getLatestOpenPairedTaskForChat(chatJid)
+    : null;
+  if (
+    task?.supervisor_state === 'waiting_user' &&
+    task.last_blocker_class === 'user_input'
+  ) {
+    // Only a new human instruction may resume a user-stopped Goal. In
+    // particular, don't re-read old role cursors and pipe stale human context.
+    const lastMessage = processableGroupMessages.at(-1);
+    if (lastMessage) {
+      advanceLastAgentCursor(
+        args.lastAgentTimestamps,
+        args.saveState,
+        chatJid,
+        lastMessage.seq ?? lastMessage.timestamp,
+      );
+    }
     return;
   }
 

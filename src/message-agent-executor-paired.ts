@@ -255,6 +255,7 @@ class PairedExecutionLifecycleController implements PairedExecutionLifecycle {
     if (!pairedExecutionContext || this.pairedExecutionCompleted) {
       return;
     }
+    if (!this.currentRunOwnsActiveAttempt('immediate-completion')) return;
 
     this.pairedExecutionStatus = status;
     if (status === 'succeeded') {

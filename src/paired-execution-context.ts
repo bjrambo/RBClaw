@@ -301,7 +301,9 @@ export function resolveOwnerTaskForHumanMessage(args: {
       canonicalWorkDir &&
       (supervisorState === 'waiting_user' || supervisorState === 'parked')
     ) {
-      const now = new Date().toISOString();
+      const now = new Date(
+        Math.max(Date.now(), Date.parse(existing.updated_at) + 1),
+      ).toISOString();
       applyPairedTaskPatch({
         taskId: existing.id,
         expectedUpdatedAt: existing.updated_at,
@@ -643,6 +645,14 @@ export function preparePairedExecutionContext(args: {
   }
 
   const latestTask = getPairedTaskById(task.id) ?? task;
+  if (
+    latestTask.supervisor_state === 'waiting_user' &&
+    latestTask.last_blocker_class === 'user_input'
+  ) {
+    throw new Error(
+      'Paired task is stopped and requires a new human instruction',
+    );
+  }
   const claimedTaskUpdatedAt = resolveClaimedTaskUpdatedAt({
     latestTask,
     role: roomRoleContext.role,
@@ -650,7 +660,9 @@ export function preparePairedExecutionContext(args: {
   });
   let workDir = resolveDirectWorkDir(latestTask.work_dir);
   let blockMessage: string | undefined;
-  const now = new Date().toISOString();
+  const now = new Date(
+    Math.max(Date.now(), Date.parse(latestTask.updated_at)),
+  ).toISOString();
 
   if (roomRoleContext.role === 'owner') {
     // New human message keeps the same task only for active review loops.
@@ -694,7 +706,16 @@ export function preparePairedExecutionContext(args: {
   });
   const ownerRequiredAction =
     roomRoleContext.role === 'owner'
-      ? resolveOwnerRequiredAction(getPairedTurnOutputs(task.id))
+      ? resolveOwnerRequiredAction(
+          getPairedTurnOutputs(task.id).filter(
+            (output) =>
+              (latestTask.episode_number ?? 1) <= 1 ||
+              latestTask.review_requested_at != null ||
+              latestTask.arbiter_verdict != null ||
+              !latestTask.supervisor_state_changed_at ||
+              output.created_at >= latestTask.supervisor_state_changed_at,
+          ),
+        )
       : undefined;
   const ownerTurnSourceRef =
     roomRoleContext.role === 'owner'
@@ -781,6 +802,12 @@ function completePairedExecutionContextBody(
       },
       'Ignoring late paired execution completion for an already completed task',
     );
+    return;
+  }
+  if (
+    task.supervisor_state === 'waiting_user' &&
+    task.last_blocker_class === 'user_input'
+  ) {
     return;
   }
 

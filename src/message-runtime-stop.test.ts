@@ -5,7 +5,7 @@ vi.mock('./service-routing.js', async () => {
   const actual = await vi.importActual<typeof import('./service-routing.js')>(
     './service-routing.js',
   );
-  return { ...actual, hasReviewerLease: () => false };
+  return { ...actual, hasReviewerLease: vi.fn(() => false) };
 });
 
 // Exercise the real queue lifecycle without sending signals or writing IPC files.
@@ -17,6 +17,11 @@ vi.mock('./group-queue-ipc.js', () => ({
 import {
   _initTestDatabase,
   getMessagesSinceSeq,
+  createPairedTask,
+  createProducedWorkItem,
+  getPairedTaskById,
+  getLatestOpenPairedTaskForChat,
+  getWorkItemById,
   getSessionForAgentType,
   setSessionForAgentType,
   storeChatMetadata,
@@ -26,8 +31,14 @@ import { GroupQueue } from './group-queue.js';
 import { createProcessGroupMessages } from './message-runtime-group-processing.js';
 import { processMessageLoopTick } from './message-runtime-loop.js';
 import { advanceLastAgentCursor } from './message-runtime-rules.js';
+import { hasReviewerLease } from './service-routing.js';
 import type { ExecuteTurnFn } from './message-runtime-types.js';
-import type { Channel, NewMessage, RegisteredGroup } from './types.js';
+import type {
+  Channel,
+  NewMessage,
+  PairedTask,
+  RegisteredGroup,
+} from './types.js';
 
 const chatJid = 'stop@test';
 const timestamp = '2026-10-08T14:57:28.000Z';
@@ -39,6 +50,7 @@ const group: RegisteredGroup = {
   isMain: true,
   requiresTrigger: false,
   agentType: 'codex',
+  workDir: process.cwd(),
 };
 
 function addMessage(id: string, content: string): NewMessage {
@@ -161,11 +173,134 @@ const settle = () => vi.advanceTimersByTimeAsync(1);
 
 describe('/stop through the message loop, queued command gate and queue cleanup', () => {
   beforeEach(() => {
+    vi.mocked(hasReviewerLease).mockReturnValue(false);
     _initTestDatabase();
     storeChatMetadata(chatJid, timestamp, 'Stop regression');
     setSessionForAgentType(group.folder, 'codex', 'existing-session');
     vi.useFakeTimers();
   });
+
+  it('keeps the same paired Goal when /stop and direction B arrive during a running turn', async () => {
+    vi.mocked(hasReviewerLease).mockReturnValue(true);
+    const original: PairedTask = {
+      id: 'stop-same-goal',
+      chat_jid: chatJid,
+      group_folder: group.folder,
+      work_dir: process.cwd(),
+      owner_service_id: 'codex-main',
+      reviewer_service_id: 'claude',
+      owner_agent_type: 'codex',
+      reviewer_agent_type: 'claude-code',
+      title: 'Keep this goal',
+      source_ref: 'HEAD',
+      plan_notes: 'Original goal and constraints',
+      round_trip_count: 1,
+      owner_failure_count: 2,
+      review_requested_at: null,
+      status: 'active',
+      review_phase: 'implementation',
+      arbiter_verdict: null,
+      arbiter_requested_at: null,
+      completion_reason: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    createPairedTask(original);
+    const h = harness();
+    addMessage('initial', 'Implement direction A');
+    await h.tick();
+    await settle();
+    const stop = addMessage('stop', '/stop');
+    addMessage('next', 'Keep the same goal, change direction to B');
+    await h.tick();
+    expect(h.proc.kill).toHaveBeenCalledOnce();
+    expect(getLatestOpenPairedTaskForChat(chatJid)).toMatchObject({
+      id: original.id,
+      status: 'active',
+      supervisor_state: 'waiting_user',
+      completion_reason: null,
+    });
+    expect(h.lastAgentTimestamps[chatJid]).toBe(String(stop.seq));
+    h.finishFirst({
+      outputStatus: 'success',
+      deliverySucceeded: true,
+      visiblePhase: 'final',
+    });
+    await settle();
+    expect(h.executeTurn).toHaveBeenCalledTimes(2);
+    expect(h.executeTurn.mock.calls[1][0]).toMatchObject({
+      forcedRole: 'owner',
+    });
+    expect(h.executeTurn.mock.calls[1][0].prompt).toContain(
+      'change direction to B',
+    );
+    expect(getPairedTaskById(original.id)).toMatchObject({
+      id: original.id,
+      status: 'active',
+      supervisor_state: 'runnable',
+      episode_number: 2,
+      title: original.title,
+      plan_notes: original.plan_notes,
+      review_phase: 'implementation',
+    });
+    expect(h.clearSession).not.toHaveBeenCalled();
+  });
+
+  it.each(['owner', 'reviewer', 'arbiter'] as const)(
+    'handles queued /stop before retrying the old %s output or splitting its merge_ready task',
+    async (deliveryRole) => {
+      vi.mocked(hasReviewerLease).mockReturnValue(true);
+      const original: PairedTask = {
+        id: 'stop-before-retry',
+        chat_jid: chatJid,
+        group_folder: group.folder,
+        work_dir: process.cwd(),
+        owner_service_id: 'codex-main',
+        reviewer_service_id: 'claude',
+        owner_agent_type: 'codex',
+        reviewer_agent_type: 'claude-code',
+        title: null,
+        source_ref: 'HEAD',
+        plan_notes: null,
+        round_trip_count: 1,
+        review_requested_at: null,
+        status: 'merge_ready',
+        arbiter_verdict: null,
+        arbiter_requested_at: null,
+        completion_reason: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+      createPairedTask(original);
+      const work = createProducedWorkItem({
+        chat_jid: chatJid,
+        group_folder: group.folder,
+        paired_task_id: original.id,
+        delivery_role: deliveryRole,
+        agent_type: 'codex',
+        start_seq: 0,
+        end_seq: 0,
+        result_payload: 'Old approval must not be sent',
+      });
+      const h = harness();
+      addMessage('stop', '/stop');
+      h.queue.enqueueMessageCheck(chatJid);
+      await settle();
+      expect(getLatestOpenPairedTaskForChat(chatJid)?.id).toBe(original.id);
+      expect(getPairedTaskById(original.id)?.supervisor_state).toBe(
+        'waiting_user',
+      );
+      expect(getWorkItemById(work.id)?.last_error).toBe(
+        'interrupted_by_user_stop',
+      );
+      expect(h.channel.sendMessage).toHaveBeenCalledExactlyOnceWith(
+        chatJid,
+        'No agent is currently running in this room.',
+        expect.objectContaining({ deliveryKey: expect.any(String) }),
+      );
+      expect(h.executeTurn).not.toHaveBeenCalled();
+    },
+  );
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();

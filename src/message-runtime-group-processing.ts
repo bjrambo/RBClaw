@@ -3,6 +3,7 @@ import {
   getMessagesSinceSeq,
   getOpenWorkItemForChat,
   markWorkItemDelivered,
+  pausePairedTaskForChat,
   type WorkItem,
 } from './db.js';
 import {
@@ -36,7 +37,10 @@ import {
   hasHumanMessageAfterWorkItem,
 } from './message-runtime-preflight-messages.js';
 import { deliverCanonicalOutboundMessage } from './ipc-outbound-delivery.js';
-import { extractSessionCommand } from './session-commands.js';
+import {
+  extractSessionCommand,
+  isSessionCommandAllowed,
+} from './session-commands.js';
 import { findChannel, formatMessages } from './router.js';
 import { createScopedLogger, logger } from './logger.js';
 import type { AgentOutput } from './agent-runner.js';
@@ -173,17 +177,34 @@ function resolvePendingDeliveryState(
     ? (getLatestOpenPairedTaskForChat(chatJid) ?? null)
     : null;
   let openWorkItem = getOpenWorkItemForChat(chatJid, SERVICE_SESSION_SCOPE);
+  const freshHumanMessages = openWorkItem
+    ? getFreshHumanPreflightMessages({
+        chatJid,
+        channel,
+        lastAgentTimestamps: args.getLastAgentTimestamps(),
+        assistantName: args.assistantName,
+        failureFinalText: args.failureFinalText,
+      })
+    : [];
+  if (
+    freshHumanMessages.some(
+      (message) =>
+        extractSessionCommand(message.content, args.triggerPattern) ===
+          '/stop' &&
+        isSessionCommandAllowed(
+          group.isMain === true,
+          message.is_from_me === true,
+          isSessionCommandSenderAllowed(message.sender),
+        ),
+    )
+  ) {
+    // Let the command gate stop the episode before retrying any role's old
+    // output or superseding a merge_ready Goal because of the /stop itself.
+    return { pendingTask, openWorkItem: undefined };
+  }
   if (openWorkItem?.delivery_role !== 'owner' || !pendingTask) {
     return { pendingTask, openWorkItem };
   }
-
-  const freshHumanMessages = getFreshHumanPreflightMessages({
-    chatJid,
-    channel,
-    lastAgentTimestamps: args.getLastAgentTimestamps(),
-    assistantName: args.assistantName,
-    failureFinalText: args.failureFinalText,
-  });
   if (pendingTask.status === 'merge_ready' && freshHumanMessages.length > 0) {
     const resolvedTask = resolveOwnerTaskForHumanMessage({
       group,
@@ -480,6 +501,11 @@ async function runQueuedRunGates(
       isAdminSender: (msg) => isSessionCommandSenderAllowed(msg.sender),
       canSenderInteract: () => true,
       resetPairedTask: () => completePairedTaskAsStopped(runtime.chatJid),
+      pausePairedTask: () => {
+        if (hasReviewerLease(runtime.chatJid)) {
+          pausePairedTaskForChat(runtime.chatJid);
+        }
+      },
       killProcess: () => args.queue.killProcess(runtime.chatJid),
     },
   });

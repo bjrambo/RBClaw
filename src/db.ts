@@ -121,6 +121,7 @@ export {
   getPendingServiceHandoffs,
   insertPairedTurnOutput,
   markPairedTurnRunning,
+  pausePairedTaskForChat,
   refreshPairedTaskExecutionLease,
   recoverInterruptedPairedTurnAttemptsForService,
   releasePairedTaskExecutionLease,

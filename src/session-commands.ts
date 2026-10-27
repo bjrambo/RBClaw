@@ -79,6 +79,8 @@ export interface SessionCommandDeps {
   canSenderInteract: (msg: NewMessage) => boolean;
   /** Reset/complete the active paired task so ping-pong stops. */
   resetPairedTask?: () => void;
+  /** Interrupt execution while retaining the same paired task for new input. */
+  pausePairedTask?: () => void;
   /** Kill the currently running agent process for this group. Returns true if a process was killed. */
   killProcess: () => boolean;
 }
@@ -157,8 +159,14 @@ export async function handleSessionCommand(opts: {
   }
 
   if (command === '/stop') {
-    const killed = deps.killProcess();
-    deps.resetPairedTask?.();
+    // Invalidate the episode before signalling the runner, so a late result
+    // cannot complete the task or restart its pending reviewer/arbiter turn.
+    let killed = false;
+    try {
+      deps.pausePairedTask?.();
+    } finally {
+      killed = deps.killProcess();
+    }
     // Consume only this command, not later messages sharing its timestamp.
     deps.advanceCursor(cmdMsg.seq ?? cmdMsg.timestamp);
     await deps.sendMessage(

@@ -5,6 +5,7 @@ vi.mock('./db.js', () => ({
   getLatestOpenPairedTaskForChat: vi.fn(() => null),
   getMessagesSinceSeq: vi.fn(() => []),
   getPairedTurnOutputs: vi.fn(() => []),
+  pausePairedTaskForChat: vi.fn(),
 }));
 
 vi.mock('./service-routing.js', () => ({
@@ -20,10 +21,10 @@ import {
   getLastHumanMessageTimestamp,
   getLatestOpenPairedTaskForChat,
   getMessagesSinceSeq,
+  pausePairedTaskForChat,
 } from './db.js';
 import { processLoopGroupMessages } from './message-runtime-dispatch.js';
 import { MessageTurnController } from './message-turn-controller.js';
-import { transitionPairedTaskStatus } from './paired-task-status.js';
 import { hasReviewerLease } from './service-routing.js';
 import type { Channel, NewMessage, RegisteredGroup } from './types.js';
 
@@ -35,8 +36,6 @@ const getLatestOpenPairedTaskForChatMock =
   getLatestOpenPairedTaskForChat as unknown as {
     mockReturnValue(value: unknown): void;
   };
-const transitionPairedTaskStatusMock =
-  transitionPairedTaskStatus as unknown as ReturnType<typeof vi.fn>;
 const hasReviewerLeaseMock = hasReviewerLease as unknown as {
   mockReturnValue(value: boolean): void;
 };
@@ -155,7 +154,7 @@ describe('processLoopGroupMessages', () => {
     expect(args.lastAgentTimestamps).toEqual({ [chatJid]: '20' });
   });
 
-  it('marks an active paired task as stopped when /stop interrupts it', async () => {
+  it('pauses the paired Goal before killing its running episode', async () => {
     hasReviewerLeaseMock.mockReturnValue(true);
     getLatestOpenPairedTaskForChatMock.mockReturnValue({
       id: 'task-1',
@@ -169,16 +168,34 @@ describe('processLoopGroupMessages', () => {
 
     await processLoopGroupMessages(args);
 
-    expect(getLatestOpenPairedTaskForChat).toHaveBeenCalledWith(chatJid);
-    expect(transitionPairedTaskStatusMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-1',
-        currentStatus: 'owner_running',
-        nextStatus: 'completed',
-        expectedUpdatedAt: '2026-04-29T13:25:00.000Z',
-        patch: { completion_reason: 'stopped' },
-      }),
-    );
+    expect(pausePairedTaskForChat).toHaveBeenCalledExactlyOnceWith(chatJid);
+    expect(
+      vi.mocked(pausePairedTaskForChat).mock.invocationCallOrder[0],
+    ).toBeLessThan(args.killProcess.mock.invocationCallOrder[0]);
+  });
+
+  it('does not pipe old context or enqueue bot messages while a user-stopped Goal waits', async () => {
+    hasReviewerLeaseMock.mockReturnValue(true);
+    getLastHumanMessageTimestampMock.mockReturnValue(timestamp);
+    getLatestOpenPairedTaskForChatMock.mockReturnValue({
+      id: 'paused-goal',
+      status: 'active',
+      supervisor_state: 'waiting_user',
+      last_blocker_class: 'user_input',
+    });
+    const args = defaultArgs({
+      groupMessages: [
+        message({
+          seq: 12,
+          content: 'TASK_DONE',
+          is_bot_message: true,
+        }),
+      ],
+    });
+    await processLoopGroupMessages(args);
+    expect(args.sendQueuedMessage).not.toHaveBeenCalled();
+    expect(args.enqueueMessageCheck).not.toHaveBeenCalled();
+    expect(args.lastAgentTimestamps[chatJid]).toBe('12');
   });
 
   it('does not process a delivered /stop again, including while its acknowledgement is pending', async () => {

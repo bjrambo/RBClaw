@@ -64,6 +64,7 @@ import {
   type PairedTurnRecord,
 } from './paired-turns.js';
 import { requireDatabase } from './runtime-database.js';
+import { pausePairedTaskForChatInDatabase } from './paired-task-interruption.js';
 import {
   type CompleteServiceHandoffCursorInput,
   type CreateServiceHandoffInput,
@@ -79,6 +80,10 @@ import {
 
 export function createPairedTask(task: PairedTask): void {
   createPairedTaskInDatabase(requireDatabase(), task);
+}
+
+export function pausePairedTaskForChat(chatJid: string): boolean {
+  return pausePairedTaskForChatInDatabase(requireDatabase(), chatJid);
 }
 
 export function getPairedTaskById(id: string): PairedTask | undefined {

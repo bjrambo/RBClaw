@@ -116,6 +116,8 @@ function makeDeps(
     runAgent: vi.fn().mockResolvedValue('success'),
     closeStdin: vi.fn(),
     clearSession: vi.fn(),
+    pausePairedTask: vi.fn(),
+    resetPairedTask: vi.fn(),
     advanceCursor: vi.fn(),
     formatMessages: vi.fn().mockReturnValue('<formatted>'),
     isAdminSender: vi.fn().mockReturnValue(false),
@@ -145,6 +147,11 @@ describe('handleSessionCommand', () => {
       });
       expect(result).toEqual({ handled: true, success: true });
       expect(deps.killProcess).toHaveBeenCalledOnce();
+      expect(deps.pausePairedTask).toHaveBeenCalledOnce();
+      expect(deps.resetPairedTask).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(deps.pausePairedTask!).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(deps.killProcess).mock.invocationCallOrder[0]);
       expect(deps.advanceCursor).toHaveBeenCalledExactlyOnceWith(10);
       expect(deps.sendMessage).toHaveBeenCalledExactlyOnceWith(
         running
@@ -214,6 +221,8 @@ describe('handleSessionCommand', () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.closeStdin).toHaveBeenCalledTimes(1);
     expect(deps.clearSession).toHaveBeenCalledTimes(1);
+    expect(deps.resetPairedTask).toHaveBeenCalledOnce();
+    expect(deps.pausePairedTask).not.toHaveBeenCalled();
     expect(deps.advanceCursor).toHaveBeenCalledWith('100');
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.sendMessage).toHaveBeenCalledWith(
@@ -237,6 +246,41 @@ describe('handleSessionCommand', () => {
     );
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.advanceCursor).toHaveBeenCalledWith('100');
+  });
+
+  it('does not pause or kill a task for an unauthorized /stop', async () => {
+    const deps = makeDeps();
+    await handleSessionCommand({
+      missedMessages: [makeMsg('/stop')],
+      isMainGroup: false,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(deps.pausePairedTask).not.toHaveBeenCalled();
+    expect(deps.killProcess).not.toHaveBeenCalled();
+    expect(deps.resetPairedTask).not.toHaveBeenCalled();
+  });
+
+  it('still stops the process when persisting the pause fails', async () => {
+    const deps = makeDeps({
+      pausePairedTask: vi.fn(() => {
+        throw new Error('DB unavailable');
+      }),
+    });
+    await expect(
+      handleSessionCommand({
+        missedMessages: [makeMsg('/stop')],
+        isMainGroup: true,
+        groupName: 'test',
+        triggerPattern: trigger,
+        timezone: 'UTC',
+        deps,
+      }),
+    ).rejects.toThrow('DB unavailable');
+    expect(deps.killProcess).toHaveBeenCalledOnce();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
   it('silently consumes denied command when sender cannot interact', async () => {

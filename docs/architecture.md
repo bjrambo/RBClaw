@@ -123,6 +123,17 @@ Persistent Goal (paired_tasks.id)
 - `waiting_user`: 새 사용자 입력으로 같은 Goal 재개
 - `parked`: 자동 실행 중지, 사용자 입력으로 명시적 재개
 
+`/stop`은 현재 실행을 중단하고 같은 Goal을 `active / waiting_user`로
+유지합니다. 작업 목표·계획·파일·대화 세션·기존 리뷰 이력은 보존하고,
+새 사용자 지시가 오면 같은 Goal ID의 새 Episode를 오너 구현 단계부터
+시작합니다. 이전 리뷰 승인·중재 지시를 새 방향의 승인으로 재사용하지
+않습니다. 중단 시 이전 예약·실행 attempt·fallback handoff·미전송 결과와
+실행 lease를 함께 무효화하여 복구나 늦은 결과가 작업을 재개하지 못하게
+합니다. `/clear`는 기존처럼 세션을 초기화하고 열린 과업을 종료합니다.
+새 명령어·상태값·DB 마이그레이션은 추가하지 않습니다. `/stop`은 적용한
+파일 변경이나 외부 작업을 롤백하는 명령이 아닙니다. 일반(single) 방은
+기존 실행 중단과 세션 보존 동작을 유지합니다.
+
 Arbiter의 `PROCEED`, `REVISE`, `RESET`은 새 Episode를 열어 episode counter만
 초기화합니다. total counter는 Goal 종료까지 감소하지 않습니다. Arbiter
 directive는 runner structured output에서 SQLite까지 보존하며 canonical JSON
