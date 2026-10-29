@@ -22,11 +22,35 @@ import {
   type Channel,
   type NewMessage,
   type PairedRoomRole,
+  type PairedTask,
   type PairedTaskStatus,
   type RegisteredGroup,
 } from './types.js';
 
 const BOT_COLLABORATION_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+/** A published peer result is not a new request once its task has closed. */
+export function filterTasklessPairedBotMessages(args: {
+  pairedRoom: boolean;
+  task: PairedTask | null | undefined;
+  messages: NewMessage[];
+  channels: ReadonlyArray<Channel | null>;
+}): NewMessage[] {
+  if (args.task || !args.pairedRoom) return args.messages;
+  return args.messages.filter(
+    (message) =>
+      message.message_source_kind === 'trusted_external_bot' ||
+      !message.is_bot_message ||
+      !args.channels.some(
+        (channel) =>
+          channel &&
+          ['discord', 'discord-review', 'discord-arbiter'].includes(
+            channel.name,
+          ) &&
+          channel.isOwnMessage?.(message),
+      ),
+  );
+}
 
 export type MessageOriginFlags = Pick<
   NewMessage,

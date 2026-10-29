@@ -3,10 +3,6 @@ import { isModelDocumentPath } from 'rbclaw-runners-shared';
 import { buildArbiterContextPrompt } from './arbiter-context.js';
 import { TASK_USER_CONTEXT_START_SKEW_MS } from './message-runtime-task-context.js';
 import {
-  isPairedFinalReportEnabled,
-  PAIRED_FINAL_REPORT_GUIDANCE,
-} from './paired-final-report.js';
-import {
   ownerActionPromptHint,
   type OwnerRequiredAction,
 } from './paired-owner-action.js';
@@ -244,10 +240,7 @@ export function buildReviewerPendingPrompt(args: {
 }): string {
   const finalReviewGuidance =
     args.reviewPhase === 'final'
-      ? "\n\nCurrent review phase: final verification. Verify the owner's claimed completion, Git, deployment, restart, and operational evidence that are in the approved user scope. If everything is complete, TASK_DONE closes the task; return work to the owner only for a concrete defect or missing requested action." +
-        (isPairedFinalReportEnabled(args.chatJid)
-          ? `\n\n${PAIRED_FINAL_REPORT_GUIDANCE}\nKeep final approval brief: identify the owner result being approved, state your review\nconclusion and checks you actually performed, and mention corrections or remaining\ncaveats when present. The runtime does not append the owner report or attachments.\nYour review remains public; reject concrete defects instead of approving them.`
-          : '')
+      ? "\n\nCurrent review phase: final verification. Verify the owner's claimed completion, Git, deployment, restart, and operational evidence that are in the approved user scope. If everything is complete, TASK_DONE closes the task; return work to the owner only for a concrete defect or missing requested action."
       : '';
   if (args.turnOutputs.length > 0) {
     return `${turnOutputsOnlyPrompt(
@@ -336,7 +329,6 @@ export function buildArbiterPromptForTask(args: {
 }
 
 export function buildFinalizePendingPrompt(args: {
-  chatJid?: string;
   turnOutputs: PairedTurnOutput[];
   recentHumanMessages: NewMessage[];
   taskCreatedAt?: string | null;
@@ -360,9 +352,5 @@ ${instructionContext}
 Complete every remaining action in those instructions before reporting final completion. Explicit non-voice user authorization for commit, push, deploy, restart, SSH, or other high-risk work remains valid for this task: perform the required preflight, but do not ask the user or reviewer to approve the same action again.
 If all requested and authorized actions are complete and verified, your first line must be TASK_DONE.
 Use STEP_DONE only when this same task still has owner work remaining; continue it directly instead of closing the task or waiting for a new user turn.
-If code changes are made after this approval, request another review pass. If your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.${
-    args.chatJid && isPairedFinalReportEnabled(args.chatJid)
-      ? `\n\n${PAIRED_FINAL_REPORT_GUIDANCE}`
-      : ''
-  }`;
+If code changes are made after this approval, request another review pass. If your first line is DONE_WITH_CONCERNS, the system will reopen review instead of finishing.`;
 }

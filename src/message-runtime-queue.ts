@@ -1,6 +1,5 @@
 import { getPairedTaskById, getPairedTurnOutputs } from './db.js';
 import { logger } from './logger.js';
-import { filterTasklessPairedBotMessages } from './paired-final-report.js';
 import { hasReviewerLease } from './service-routing.js';
 import {
   buildArbiterPromptForTask,
@@ -19,6 +18,7 @@ import {
 import { resolveStoredVisibleVerdict } from './paired-verdict.js';
 import {
   advanceLastAgentCursor,
+  filterTasklessPairedBotMessages,
   finalizeQueuedRunCursor,
   isExternalHumanMessage,
   resolveActiveRole,
@@ -527,7 +527,6 @@ export async function runQueuedGroupTurn(args: {
 }): Promise<boolean> {
   const { chatJid, group, runId, log, task, roleToChannel } = args;
   const missedMessages = filterTasklessPairedBotMessages({
-    chatJid,
     pairedRoom: hasReviewerLease(chatJid),
     task,
     messages: args.missedMessages,

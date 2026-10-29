@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./agent-runner.js', async () => {
   const mocks = await import('../test/helpers/message-runtime-mocks.js');
@@ -46,13 +46,13 @@ import {
   makeGroup,
 } from '../test/helpers/message-runtime-fixtures.js';
 
-const chatJid = 'dc:final-report-test';
+const chatJid = 'dc:completed-task-test';
 const peerMessage = (overrides: Partial<NewMessage> = {}): NewMessage => ({
   id: 'final-review',
   chat_jid: chatJid,
   sender: 'reviewer-bot',
   sender_name: 'Reviewer',
-  content: 'TASK_DONE — 최종 결정사항\n검토된 오너 작업 결과와 최종 검토 결론',
+  content: 'TASK_DONE\n검토 승인',
   timestamp: '2026-10-26T11:14:33.598Z',
   seq: 51,
   is_from_me: false,
@@ -115,7 +115,7 @@ function harness(messages: NewMessage[]) {
       reason: 'messages',
     });
   const runPoller = async (newMessages = messages) => {
-    vi.mocked(db.getNewMessages).mockReturnValue({
+    vi.mocked(db.getNewMessagesBySeq).mockReturnValue({
       messages: newMessages,
       newSeqCursor: String(newMessages.at(-1)?.seq ?? 0),
     });
@@ -156,12 +156,10 @@ function harness(messages: NewMessage[]) {
 beforeEach(() => {
   vi.resetAllMocks();
   resetPairedFollowUpScheduleState();
-  vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', chatJid);
   vi.mocked(serviceRouting.hasReviewerLease).mockReturnValue(true);
   vi.mocked(db.getLastBotFinalMessage).mockReturnValue([]);
   vi.mocked(db.getRecentChatMessages).mockReturnValue([]);
 });
-afterEach(() => vi.unstubAllEnvs());
 
 describe('completed-task paired bot messages', () => {
   it.each(['reviewer-bot', 'arbiter-bot'])(
@@ -201,16 +199,6 @@ describe('completed-task paired bot messages', () => {
     expect(agentRunner.runAgentProcess).not.toHaveBeenCalled();
     expect(test.cursors[chatJid]).toBe('52');
   });
-
-  it.each(['', 'dc:another-room'])(
-    'preserves legacy behavior outside the enabled room: %s',
-    async (rooms) => {
-      vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', rooms);
-      const test = harness([peerMessage()]);
-      await test.runQueue();
-      expect(agentRunner.runAgentProcess).toHaveBeenCalledTimes(1);
-    },
-  );
 
   it('does not suppress an unrelated bot based on its display name or verdict', async () => {
     const test = harness([

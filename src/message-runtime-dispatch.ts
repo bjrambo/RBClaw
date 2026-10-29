@@ -1,8 +1,4 @@
 import { logger } from './logger.js';
-import {
-  filterTasklessPairedBotMessages,
-  isPairedFinalReportEnabled,
-} from './paired-final-report.js';
 import { normalizeStoredSeqCursor } from './message-cursor.js';
 import {
   getLatestOpenPairedTaskForChat,
@@ -16,6 +12,7 @@ import {
 import { HUMAN_MESSAGE_DETECTED_CLOSE_REASON } from './message-close-reasons.js';
 import {
   advanceLastAgentCursor,
+  filterTasklessPairedBotMessages,
   filterLoopingPairedBotMessages,
   getProcessableMessages,
   isExternalHumanMessage,
@@ -167,7 +164,6 @@ export async function processQueuedGroupDispatch(args: {
     args.failureFinalText,
   );
   const messagesToSend = filterTasklessPairedBotMessages({
-    chatJid,
     pairedRoom: hasReviewerLease(chatJid),
     task: loopPendingTask,
     messages:
@@ -247,11 +243,10 @@ export async function processQueuedGroupDispatch(args: {
       );
     }
     // The poller holds the owner channel even while a reviewer/arbiter runs.
-    // In opted-in rooms the running turn alone owns typing and its cleanup;
+    // In paired rooms the running turn alone owns typing and its cleanup;
     // old human context must not create a second, unowned owner timer here.
     const suppressQueuedTyping =
-      isBotOnlyPairedFollowUp ||
-      (hasReviewerLease(chatJid) && isPairedFinalReportEnabled(chatJid));
+      isBotOnlyPairedFollowUp || hasReviewerLease(chatJid);
     logger.debug(
       {
         transition: 'typing:on',

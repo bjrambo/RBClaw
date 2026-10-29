@@ -171,7 +171,7 @@ describe('processLoopGroupMessages', () => {
     expect(pausePairedTaskForChat).toHaveBeenCalledExactlyOnceWith(chatJid);
     expect(
       vi.mocked(pausePairedTaskForChat).mock.invocationCallOrder[0],
-    ).toBeLessThan(args.killProcess.mock.invocationCallOrder[0]);
+    ).toBeLessThan(vi.mocked(args.killProcess).mock.invocationCallOrder[0]);
   });
 
   it('does not pipe old context or enqueue bot messages while a user-stopped Goal waits', async () => {
@@ -377,12 +377,11 @@ describe('processLoopGroupMessages', () => {
   });
 });
 
-describe('queued typing ownership in opted-in paired rooms', () => {
+describe('queued typing ownership in paired rooms', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(timestamp));
-    vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', chatJid);
     hasReviewerLeaseMock.mockReturnValue(true);
     getLastHumanMessageTimestampMock.mockReturnValue(timestamp);
   });
@@ -390,7 +389,6 @@ describe('queued typing ownership in opted-in paired rooms', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
-    vi.unstubAllEnvs();
   });
 
   function harness() {
@@ -495,21 +493,7 @@ describe('queued typing ownership in opted-in paired rooms', () => {
     },
   );
 
-  it('keeps legacy queued typing when the paired-room feature is disabled', async () => {
-    vi.stubEnv('RBCLAW_FINAL_DECISION_ROOMS', 'dc:another-room');
-    const test = harness();
-    getLatestOpenPairedTaskForChatMock.mockReturnValue({
-      id: 'typing-task',
-      status: 'in_review',
-      review_phase: 'final',
-    });
-    await processLoopGroupMessages(test.args);
-    expect(test.channels[0].setTyping).toHaveBeenCalledWith(chatJid, true);
-    expect(test.args.sendQueuedMessage).toHaveBeenCalledOnce();
-    await test.channels[0].setTyping(chatJid, false);
-  });
-
-  it('does not change queued typing in a non-paired room even if opted in', async () => {
+  it('does not change queued typing in a non-paired room', async () => {
     hasReviewerLeaseMock.mockReturnValue(false);
     getLatestOpenPairedTaskForChatMock.mockReturnValue(null);
     const test = harness();

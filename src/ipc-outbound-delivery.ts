@@ -3,7 +3,6 @@ import type { WorkItem } from './db/work-items.js';
 import { resolveRuntimeAttachmentBaseDirs } from './attachment-base-dirs.js';
 import { deliverOpenWorkItem } from './message-runtime-delivery.js';
 import { parseVisibleVerdict } from './paired-verdict.js';
-import { preparePairedFinalReport } from './paired-final-report.js';
 import { resolveChannelForDeliveryRole } from './router.js';
 import { normalizePairedRoomRole } from './types.js';
 import type {
@@ -51,7 +50,6 @@ export interface CanonicalOutboundDeliveryArgs {
   text: string;
   deliveryRole?: PairedRoomRole;
   attachments?: OutboundAttachment[];
-  runId?: string;
 }
 
 export interface CanonicalOutboundDeliveryDeps {
@@ -104,13 +102,6 @@ export async function deliverCanonicalOutboundMessage(
   );
 
   const createWorkItem = deps.createWorkItem ?? createProducedWorkItem;
-  const finalReport = preparePairedFinalReport({
-    chatJid: args.jid,
-    text: args.text,
-    deliveryRole: args.deliveryRole,
-    runId: args.runId,
-    attachments: args.attachments,
-  });
   const workItem = createWorkItem({
     group_folder: group.folder,
     chat_jid: args.jid,
@@ -118,11 +109,8 @@ export async function deliverCanonicalOutboundMessage(
     delivery_role: args.deliveryRole ?? null,
     start_seq: null,
     end_seq: null,
-    result_payload: finalReport.text,
-    attachments: finalReport.attachments,
-    ...(finalReport.pairedTaskId
-      ? { paired_task_id: finalReport.pairedTaskId }
-      : {}),
+    result_payload: args.text,
+    attachments: args.attachments,
   });
 
   const deliverWorkItem = deps.deliverWorkItem ?? deliverOpenWorkItem;
@@ -181,7 +169,6 @@ export async function deliverIpcOutboundMessage(
       text: args.text,
       deliveryRole,
       attachments: args.attachments,
-      runId: args.runId,
     },
     {
       channels: deps.channels,

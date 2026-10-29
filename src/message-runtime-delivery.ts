@@ -10,7 +10,6 @@ import { resolveActiveRole } from './message-runtime-rules.js';
 import { getErrorMessage } from './utils.js';
 import type { Channel, PairedTask, PairedRoomRole } from './types.js';
 import { transitionPairedSupervisorState } from './paired-supervisor-state.js';
-import { isPairedFinalReportPayload } from './paired-final-report.js';
 
 type RuntimeDeliveryLog = Pick<typeof logger, 'info' | 'warn' | 'error'>;
 
@@ -65,17 +64,14 @@ export async function deliverOpenWorkItem(args: {
   isDuplicateOfLastBotFinal: (chatJid: string, text: string) => boolean;
   openContinuation: (chatJid: string) => void;
 }): Promise<boolean> {
-  const finalReport = isPairedFinalReportPayload(args.item);
   const replaceMessageId = args.replaceMessageId ?? null;
   const attachments = args.item.attachments ?? [];
   const hasAttachments = attachments.length > 0;
 
-  const isDuplicate =
-    !finalReport &&
-    args.isDuplicateOfLastBotFinal(
-      args.item.chat_jid,
-      args.item.result_payload,
-    );
+  const isDuplicate = args.isDuplicateOfLastBotFinal(
+    args.item.chat_jid,
+    args.item.result_payload,
+  );
 
   if (isDuplicate) {
     markWorkItemDelivered(args.item.id, null);
@@ -90,12 +86,7 @@ export async function deliverOpenWorkItem(args: {
   }
 
   try {
-    if (
-      !finalReport &&
-      replaceMessageId &&
-      args.channel.editMessage &&
-      !hasAttachments
-    ) {
+    if (replaceMessageId && args.channel.editMessage && !hasAttachments) {
       args.log.info(
         buildDeliveryLogContext(args.channel, args.item, {
           deliveryAttempts: args.item.delivery_attempts + 1,
@@ -164,21 +155,6 @@ export async function deliverOpenWorkItem(args: {
             args.item.chat_jid,
             args.item.result_payload,
           );
-    if (
-      finalReport &&
-      (!sendResult ||
-        sendResult.visible !== true ||
-        !sendResult.primaryMessageId?.trim() ||
-        !sendResult.messageIds?.length ||
-        !sendResult.messageIds.every(
-          (id) => typeof id === 'string' && id.trim(),
-        ) ||
-        !sendResult.messageIds.includes(sendResult.primaryMessageId))
-    ) {
-      throw new Error(
-        'Final report delivery did not return a visible message receipt',
-      );
-    }
     await removeReplacedProgressMessage({
       channel: args.channel,
       item: args.item,
